@@ -1,0 +1,88 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Default-Deny Catch-All
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        request.auth.token.email == 'debabratamohanta159@gmail.com' ||
+        request.auth.token.email == 'debabrata.tribune@gmail.com'
+      );
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email']) &&
+             data.keys().hasOnly(['uid', 'email', 'displayName', 'photoURL', 'role', 'createdAt']) &&
+             data.uid is string && data.uid.size() <= 128 &&
+             data.email is string && data.email.size() <= 256 &&
+             (!('displayName' in data) || (data.displayName is string && data.displayName.size() <= 100)) &&
+             (!('photoURL' in data) || (data.photoURL is string && data.photoURL.size() <= 1000)) &&
+             (!('role' in data) || (data.role in ['partner', 'admin'])) &&
+             (!('createdAt' in data) || (data.createdAt is string && data.createdAt.size() <= 64));
+    }
+
+    function isValidPartner(data) {
+      return data.keys().hasAll(['id', 'name', 'phone']) &&
+             data.id is string && data.id.size() <= 128 &&
+             data.name is string && data.name.size() <= 120 &&
+             data.phone is string && data.phone.size() <= 32 &&
+             (!('email' in data) || (data.email is string && data.email.size() <= 256)) &&
+             (!('services' in data) || (data.services is string && data.services.size() <= 1000)) &&
+             (!('city' in data) || (data.city is string && data.city.size() <= 100)) &&
+             (!('is_online' in data) || data.is_online is bool) &&
+             (!('verification_status' in data) || (data.verification_status in ['verified', 'pending', 'rejected'])) &&
+             (!('wallet_balance' in data) || data.wallet_balance is number) &&
+             (!('rating' in data) || data.rating is number);
+    }
+
+    // 2. Users Collection
+    match /users/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isSignedIn() && (isAdmin() || resource.data.uid == request.auth.uid);
+      allow create: if isValidId(userId) && isOwner(userId) && isValidUser(incoming()) && incoming().uid == request.auth.uid;
+      allow update: if isValidId(userId) && (isOwner(userId) || isAdmin()) && isValidUser(incoming()) && incoming().uid == existing().uid;
+      allow delete: if isValidId(userId) && isAdmin();
+    }
+
+    // 3. Partners Collection
+    match /partners/{partnerId} {
+      allow get: if isValidId(partnerId) && (isOwner(partnerId) || isAdmin());
+      allow list: if isSignedIn() && (isAdmin() || resource.data.id == request.auth.uid);
+      allow create: if isValidId(partnerId) && (isOwner(partnerId) || isAdmin()) && isValidPartner(incoming()) && (incoming().id == request.auth.uid || isAdmin());
+      allow update: if isValidId(partnerId) && (isOwner(partnerId) || isAdmin()) && isValidPartner(incoming()) && incoming().id == existing().id;
+      allow delete: if isValidId(partnerId) && isAdmin();
+    }
+
+    // 4. Admins Collection
+    match /admins/{adminId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+  }
+}

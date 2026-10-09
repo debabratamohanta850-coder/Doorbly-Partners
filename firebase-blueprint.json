@@ -1,0 +1,60 @@
+{
+  "entities": {
+    "users": {
+      "title": "User Profile",
+      "description": "Authenticated user profile and partner reference",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth user ID" },
+        "email": { "type": "string", "description": "User email address" },
+        "displayName": { "type": "string", "description": "Full name" },
+        "photoURL": { "type": "string", "description": "Profile picture URL" },
+        "role": { "type": "string", "enum": ["partner", "admin"], "description": "System role" },
+        "createdAt": { "type": "string", "description": "Creation timestamp" }
+      },
+      "required": ["uid", "email"]
+    },
+    "partners": {
+      "title": "Partner Profile",
+      "description": "Verified service provider profile details",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Partner ID matching auth UID" },
+        "name": { "type": "string", "description": "Partner full legal name" },
+        "email": { "type": "string", "description": "Partner registered email" },
+        "phone": { "type": "string", "description": "Phone number" },
+        "services": { "type": "string", "description": "Services list" },
+        "city": { "type": "string", "description": "Operating city" },
+        "is_online": { "type": "boolean", "description": "Availability state" },
+        "verification_status": { "type": "string", "enum": ["verified", "pending", "rejected"], "description": "Verification status" },
+        "wallet_balance": { "type": "number", "description": "Wallet balance in INR" },
+        "rating": { "type": "number", "description": "Average review rating" }
+      },
+      "required": ["id", "name", "phone"]
+    },
+    "admins": {
+      "title": "Admin",
+      "description": "List of system administrator UIDs",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Admin UID" },
+        "email": { "type": "string", "description": "Admin email" }
+      },
+      "required": ["uid", "email"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "users",
+      "description": "User profiles for authenticated users"
+    },
+    "/partners/{partnerId}": {
+      "schema": "partners",
+      "description": "Service partner profile information"
+    },
+    "/admins/{adminId}": {
+      "schema": "admins",
+      "description": "System administrators"
+    }
+  }
+}

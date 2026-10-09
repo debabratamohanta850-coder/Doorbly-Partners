@@ -1,0 +1,26 @@
+{
+  "id": "/",
+  "name": "Doorbly Partner - Doorstep Service Professional App",
+  "short_name": "Doorbly",
+  "description": "Android-first mobile application for Doorbly service partners to manage verification, live nearby job requests, doorstep navigation, service execution, wallet and earnings.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "theme_color": "#0F766E",
+  "background_color": "#0F766E",
+  "icons": [
+    {
+      "src": "https://tzqdcozwllahqmoqfawt.supabase.co/storage/v1/object/sign/logo/logo%20(2).png?token=eyJraWQiOiIzNzEyNzUwNS0yYTUzLTQ0NmMtOWY3Ni05NGE1NzhkMjRkY2QiLCJhbGciOiJIUzUxMiJ9.eyJ1cmwiOiJsb2dvL2xvZ28gKDIpLnBuZyIsInNjb3BlIjoiZG93bmxvYWQiLCJpYXQiOjE3OTEzODY2NTIsImV4cCI6MTgyMjkyMjY1Mn0.nqeQP1NbDqalfL79bcWVXpgCr8q2q6RSZ1dKaNg_SMEhKjJINBHyp1uBO3xdj80WUgcxvU6nq2C5JUUR0Hcw9A",
+      "sizes": "192x192 512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "https://tzqdcozwllahqmoqfawt.supabase.co/storage/v1/object/sign/logo/logo%20(2).png?token=eyJraWQiOiIzNzEyNzUwNS0yYTUzLTQ0NmMtOWY3Ni05NGE1NzhkMjRkY2QiLCJhbGciOiJIUzUxMiJ9.eyJ1cmwiOiJsb2dvL2xvZ28gKDIpLnBuZyIsInNjb3BlIjoiZG93bmxvYWQiLCJpYXQiOjE3OTEzODY2NTIsImV4cCI6MTgyMjkyMjY1Mn0.nqeQP1NbDqalfL79bcWVXpgCr8q2q6RSZ1dKaNg_SMEhKjJINBHyp1uBO3xdj80WUgcxvU6nq2C5JUUR0Hcw9A",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

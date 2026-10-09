@@ -1,0 +1,6 @@
+{
+  "name": "Doorbly Partner",
+  "description": "Android-first mobile application for Doorbly service partners to manage verification, live nearby job requests, doorstep navigation, service execution, wallet and earnings.",
+  "requestFramePermissions": ["geolocation", "notifications"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
