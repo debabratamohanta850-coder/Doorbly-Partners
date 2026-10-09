@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { usePartner } from '../../context/PartnerContext';
 import { supabaseService } from '../../services/supabaseClient';
 import { partnerAuthService } from '../../services/partnerAuth';
@@ -7,15 +7,10 @@ import {
   ServiceBooking,
   WithdrawalRequest,
   PartnerMembership,
-  PartnerStatus,
-  BookingStatus
+  PartnerStatus
 } from '../../types';
 import { DEFAULT_DOORBLY_CATEGORIES } from '../../services/catalogueService';
 import { DoorblyLogoIcon } from '../../constants/branding';
-import { SettingsView } from '../settings/SettingsView';
-import { PartnerApprovalView } from './PartnerApprovalView';
-import { ActivePartnersView } from './ActivePartnersView';
-import { ActiveJobsSheetView } from './ActiveJobsSheetView';
 import {
   ShieldCheck,
   UserCheck,
@@ -34,6 +29,19 @@ import {
   Menu,
   X
 } from 'lucide-react';
+
+const SettingsView = lazy(() =>
+  import('../settings/SettingsView').then((m) => ({ default: m.SettingsView }))
+);
+const PartnerApprovalView = lazy(() =>
+  import('./PartnerApprovalView').then((m) => ({ default: m.PartnerApprovalView }))
+);
+const ActivePartnersView = lazy(() =>
+  import('./ActivePartnersView').then((m) => ({ default: m.ActivePartnersView }))
+);
+const ActiveJobsSheetView = lazy(() =>
+  import('./ActiveJobsSheetView').then((m) => ({ default: m.ActiveJobsSheetView }))
+);
 
 interface AdminConsoleProps {
   onSwitchToPartnerView: () => void;
@@ -68,8 +76,6 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
   const [dispatchCustomerName, setDispatchCustomerName] = useState('Raj Kumar');
   const [dispatchPhone, setDispatchPhone] = useState('+91 98200 11223');
   const [dispatchAddress, setDispatchAddress] = useState('Patia, Bhubaneswar, Odisha');
-  const [dispatchLat, setDispatchLat] = useState('20.3547');
-  const [dispatchLng, setDispatchLng] = useState('85.8182');
   const [dispatchCategory, setDispatchCategory] = useState('AC Services');
   const [dispatchServiceName, setDispatchServiceName] = useState('AC Repair');
   const [dispatchPrice, setDispatchPrice] = useState(599);
@@ -138,10 +144,8 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
 
   const handleDispatchBooking = async (e: React.FormEvent) => {
     e.preventDefault();
-    const parsedLat = parseFloat(dispatchLat);
-    const parsedLng = parseFloat(dispatchLng);
-    const lat = Number.isFinite(parsedLat) ? parsedLat : 20.3547;
-    const lng = Number.isFinite(parsedLng) ? parsedLng : 85.8182;
+    const lat = 20.3547;
+    const lng = 85.8182;
 
     const newBooking: ServiceBooking = {
       id: `DB${Math.floor(10000 + Math.random() * 90000)}`,
@@ -181,7 +185,6 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
   const activeJobsCount = bookings.filter(b => ['ASSIGNED', 'ARRIVED', 'IN_PROGRESS'].includes(b.status)).length;
   const completedJobsCount = bookings.filter(b => b.status === 'COMPLETED').length;
   const pendingWithdrawalCount = withdrawals.filter(w => w.status === 'requested').length;
-  const totalGMV = bookings.reduce((sum, b) => sum + (b.customer_price || 0), 0);
 
   // Strict Admin-Only Guard: Restrict from all non-admin users
   if (!isAdminUnlocked || !partnerAuthService.isDeviceAdminUnlocked()) {
@@ -321,7 +324,13 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
             <p className="text-xs">Loading operational records...</p>
           </div>
         ) : (
-          <>
+          <Suspense
+            fallback={
+              <div className="py-12 text-center text-slate-400">
+                <RefreshCw className="w-5 h-5 animate-spin mx-auto text-[#0F766E]" />
+              </div>
+            }
+          >
             {/* OVERVIEW TAB */}
             {activeTab === 'overview' && (
               <div className="space-y-4">
@@ -500,32 +509,38 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
 
             {/* ACTIVE PARTNERS EXCEL SHEET PAGE */}
             {activeTab === 'active_partners' && (
-              <ActivePartnersView
-                partners={partners}
-                onRefresh={loadData}
-                onBackToOverview={() => setActiveTab('overview')}
-              />
+              <Suspense fallback={<div className="py-12 text-center text-xs text-slate-400">Loading sheet...</div>}>
+                <ActivePartnersView
+                  partners={partners}
+                  onRefresh={loadData}
+                  onBackToOverview={() => setActiveTab('overview')}
+                />
+              </Suspense>
             )}
 
             {/* ACTIVE JOBS EXCEL SHEET PAGE (Linked from Active Jobs Card Only) */}
             {activeTab === 'active_jobs' && (
-              <ActiveJobsSheetView
-                bookings={bookings}
-                partners={partners}
-                onRefresh={loadData}
-                onBackToOverview={() => setActiveTab('overview')}
-              />
+              <Suspense fallback={<div className="py-12 text-center text-xs text-slate-400">Loading sheet...</div>}>
+                <ActiveJobsSheetView
+                  bookings={bookings}
+                  partners={partners}
+                  onRefresh={loadData}
+                  onBackToOverview={() => setActiveTab('overview')}
+                />
+              </Suspense>
             )}
 
             {/* PARTNER APPROVAL & ACTIVATION PAGE (Admin Only) */}
             {activeTab === 'approval' && (
-              <PartnerApprovalView
-                partners={partners}
-                memberships={memberships}
-                onRefresh={loadData}
-                onUpdateStatus={handleUpdatePartnerStatus}
-                onActivateMembership={handleUpdateMembership}
-              />
+              <Suspense fallback={<div className="py-12 text-center text-xs text-slate-400">Loading approval sheet...</div>}>
+                <PartnerApprovalView
+                  partners={partners}
+                  memberships={memberships}
+                  onRefresh={loadData}
+                  onUpdateStatus={handleUpdatePartnerStatus}
+                  onActivateMembership={handleUpdateMembership}
+                />
+              </Suspense>
             )}
 
             {/* OFFER OF THE DAY EDITOR TAB */}
@@ -1069,7 +1084,7 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
                 <SettingsView />
               </div>
             )}
-          </>
+          </Suspense>
         )}
         </main>
       </div>

@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { usePartner } from '../../context/PartnerContext';
 import { supabaseService } from '../../services/supabaseClient';
-import { Database, Check, AlertCircle, Copy, Server, Radio, ShieldCheck, Loader2, BatteryLow, BatteryCharging, BellRing, RefreshCw } from 'lucide-react';
+import { supabaseDataEngine, SyncSpeedMode } from '../../services/supabaseDataEngine';
+import { Database, Check, AlertCircle, Copy, Server, ShieldCheck, Loader2, BatteryLow, BatteryCharging, BellRing, RefreshCw, Zap } from 'lucide-react';
 import { BatterySaverPreference } from '../../services/batteryService';
 import {
   FCM_VAPID_KEY,
@@ -12,14 +13,13 @@ import {
   DEFAULT_FIREBASE_CONFIG,
   testFirestoreConnection
 } from '../../services/firebase';
-import { SUPABASE_COMPLETE_SQL_MIGRATION } from '../../constants/supabaseSqlMigration';
 
 export const SettingsView: React.FC = () => {
   const {
-    simulateIncomingJobForTesting,
-    isOnline,
     batteryState,
     lastJobPollTime,
+    dataEngineStats,
+    setDataEngineMode,
     setBatterySaverPreference,
     setSimulatedBatteryLevel,
     refreshAll,
@@ -32,7 +32,6 @@ export const SettingsView: React.FC = () => {
   const [supabaseKey, setSupabaseKey] = useState(currentConfig.anonKey);
   const [isTesting, setIsTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
-  const [copiedSql, setCopiedSql] = useState(false);
 
   // Firebase Configuration State
   const [fbConfig, setFbConfig] = useState(() => getSavedFirebaseConfig());
@@ -82,14 +81,6 @@ export const SettingsView: React.FC = () => {
     const res = await supabaseService.testConnection();
     setIsTesting(false);
     setTestResult(res);
-  };
-
-  const supabaseSqlSchema = SUPABASE_COMPLETE_SQL_MIGRATION;
-
-  const copySql = () => {
-    navigator.clipboard.writeText(supabaseSqlSchema);
-    setCopiedSql(true);
-    setTimeout(() => setCopiedSql(false), 2500);
   };
 
   return (
@@ -465,6 +456,97 @@ export const SettingsView: React.FC = () => {
         </button>
       </div>
 
+      {/* Supabase Turbo Engine Card */}
+      <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
+            <Zap className="w-4 h-4 text-amber-500 fill-amber-500" />
+            <span>Supabase Turbo Data Engine</span>
+          </h3>
+          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-amber-100 text-amber-900 border border-amber-300">
+            {dataEngineStats.mode === 'turbo'
+              ? 'Turbo Engine Active'
+              : dataEngineStats.mode === 'balanced'
+                ? 'Balanced Mode'
+                : 'Eco Mode'}
+          </span>
+        </div>
+
+        <p className="text-xs text-slate-500 leading-relaxed">
+          Accelerates all Supabase reads &amp; writes using L1 Stale-While-Revalidate (SWR) memory caching, in-flight request deduplication, persistent keep-alive HTTP pipes, and sub-50ms Realtime Broadcast delta hydration.
+        </p>
+
+        {/* Engine Speed Mode Selector */}
+        <div className="grid grid-cols-3 gap-2">
+          {(
+            [
+              { id: 'turbo', label: '⚡ Turbo (3s / SWR)' },
+              { id: 'balanced', label: 'Balanced (15s)' },
+              { id: 'eco', label: 'Eco Saver (30s)' }
+            ] as { id: SyncSpeedMode; label: string }[]
+          ).map((opt) => (
+            <button
+              key={opt.id}
+              type="button"
+              onClick={() => setDataEngineMode(opt.id)}
+              className={`py-2 px-2.5 rounded-xl font-bold text-xs border transition-all cursor-pointer ${
+                dataEngineStats.mode === opt.id
+                  ? 'bg-[#0F766E] text-white border-[#0F766E] shadow-2xs'
+                  : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Engine Throughput Metrics */}
+        <div className="grid grid-cols-4 gap-2 text-center bg-slate-50 p-3 rounded-xl border border-slate-200/80 text-xs">
+          <div>
+            <span className="text-[10px] text-slate-400 font-bold uppercase block">L1 Hits</span>
+            <span className="font-extrabold text-sm text-emerald-700">
+              {dataEngineStats.cacheHits}
+            </span>
+          </div>
+          <div className="border-x border-slate-200/80">
+            <span className="text-[10px] text-slate-400 font-bold uppercase block">Coalesced</span>
+            <span className="font-extrabold text-sm text-[#0F766E]">
+              {dataEngineStats.coalescedRequests}
+            </span>
+          </div>
+          <div className="border-r border-slate-200/80">
+            <span className="text-[10px] text-slate-400 font-bold uppercase block">Realtime Δ</span>
+            <span className="font-extrabold text-sm text-amber-600">
+              {dataEngineStats.realtimeEventsProcessed}
+            </span>
+          </div>
+          <div>
+            <span className="text-[10px] text-slate-400 font-bold uppercase block">Avg Ping</span>
+            <span className="font-extrabold text-sm text-slate-900">
+              {dataEngineStats.avgLatencyMs ? `${dataEngineStats.avgLatencyMs}ms` : '<15ms'}
+            </span>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between gap-2 pt-1">
+          <span className="text-[11px] text-slate-500">
+            Cached Keys: <strong>{dataEngineStats.cacheEntriesCount}</strong> · Net I/O:{' '}
+            <strong>{dataEngineStats.networkReads + dataEngineStats.networkWrites}</strong>
+          </span>
+          <button
+            type="button"
+            onClick={async () => {
+              await supabaseDataEngine.flushPendingWrites();
+              supabaseDataEngine.clearCache();
+              await refreshAll();
+            }}
+            className="py-1.5 px-3 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-[11px] cursor-pointer"
+          >
+            Purge L1 Cache &amp; Sync
+          </button>
+        </div>
+      </div>
+
       {/* Supabase Connection Card */}
       <form onSubmit={handleSaveConfig} className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs space-y-4">
         <div className="flex items-center justify-between">
@@ -548,47 +630,6 @@ export const SettingsView: React.FC = () => {
           </button>
         </div>
       </form>
-
-      {/* Realtime Job Dispatch Simulator for Testing */}
-      <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs space-y-3">
-        <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
-          <Radio className="w-4 h-4 text-emerald-600" />
-          <span>Live Customer Dispatch Simulator</span>
-        </h3>
-        <p className="text-xs text-slate-500">
-          Simulate a real customer booking dispatch within your radius to test the audio alert, vibration, countdown timer, and acceptance workflow.
-        </p>
-
-        <button
-          onClick={simulateIncomingJobForTesting}
-          className="w-full py-3 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-2 shadow-xs"
-        >
-          <Radio className="w-4 h-4 text-amber-400 animate-pulse" />
-          <span>Trigger Nearby Service Request ({isOnline ? 'ONLINE' : 'Turn Online First'})</span>
-        </button>
-      </div>
-
-      {/* SQL Migration Script Box */}
-      <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs space-y-3">
-        <div className="flex items-center justify-between">
-          <h3 className="font-bold text-slate-900 text-sm">
-            Supabase SQL Setup Migration
-          </h3>
-          <button
-            onClick={copySql}
-            className="py-1 px-2.5 bg-teal-50 text-[#0F766E] font-bold text-xs rounded-lg hover:bg-teal-100 flex items-center gap-1"
-          >
-            {copiedSql ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-            <span>{copiedSql ? 'Copied!' : 'Copy SQL'}</span>
-          </button>
-        </div>
-        <p className="text-xs text-slate-500">
-          Run this schema in your Supabase SQL editor to create all required partner tables and realtime publications.
-        </p>
-        <pre className="text-[11px] font-mono bg-slate-900 text-slate-200 p-3 rounded-xl max-h-48 overflow-y-auto">
-          {supabaseSqlSchema}
-        </pre>
-      </div>
     </div>
   );
 };

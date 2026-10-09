@@ -3,7 +3,6 @@ import { PartnerProvider, usePartner } from './context/PartnerContext';
 import { PartnerHeader } from './components/layout/PartnerHeader';
 import { BottomNav } from './components/layout/BottomNav';
 import { HomeDashboard } from './components/home/HomeDashboard';
-import { AuthScreen } from './components/auth/AuthScreen';
 import { PWAInstallBanner } from './components/layout/PWAInstallBanner';
 import { DoorblyLogoIcon } from './constants/branding';
 import { testFirestoreConnection } from './services/firebase';
@@ -11,11 +10,11 @@ import { locationService } from './services/locationService';
 import { Loader2, Maximize2, Phone, MessageSquare } from 'lucide-react';
 
 // Lazy-load secondary views and modals to keep the initial bundle ultra-lightweight
+const AuthScreen = lazy(() =>
+  import('./components/auth/AuthScreen').then((m) => ({ default: m.AuthScreen }))
+);
 const DrawerMenu = lazy(() =>
   import('./components/layout/DrawerMenu').then((m) => ({ default: m.DrawerMenu }))
-);
-const EmergencySOSModal = lazy(() =>
-  import('./components/support/EmergencySOSModal').then((m) => ({ default: m.EmergencySOSModal }))
 );
 const IncomingJobModal = lazy(() =>
   import('./components/home/IncomingJobModal').then((m) => ({ default: m.IncomingJobModal }))
@@ -84,7 +83,6 @@ const MainAppContent: React.FC = () => {
     logout
   } = usePartner();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [isSOSOpen, setIsSOSOpen] = useState(false);
   const [isMinimised, setIsMinimised] = useState(false);
 
   if (isLoading) {
@@ -105,7 +103,9 @@ const MainAppContent: React.FC = () => {
       <div className="min-h-screen flex flex-col">
         <PWAInstallBanner />
         <div className="flex-1">
-          <AuthScreen />
+          <Suspense fallback={<ViewFallback />}>
+            <AuthScreen />
+          </Suspense>
         </div>
       </div>
     );
@@ -202,10 +202,7 @@ const MainAppContent: React.FC = () => {
       <PWAInstallBanner />
 
       {/* Mobile Top Header */}
-      <PartnerHeader
-        onOpenMenu={() => setIsMenuOpen(true)}
-        onOpenSOS={() => setIsSOSOpen(true)}
-      />
+      <PartnerHeader onOpenMenu={() => setIsMenuOpen(true)} />
 
       {/* Main View Area */}
       <main className="flex-1 px-4 pt-4 pb-24 overflow-y-auto">
@@ -226,15 +223,11 @@ const MainAppContent: React.FC = () => {
       </main>
 
       {/* Mobile Bottom Navigation */}
-      <BottomNav
-        onOpenMenu={() => setIsMenuOpen(true)}
-        onMinimize={() => setIsMinimised(true)}
-      />
+      <BottomNav onMinimize={() => setIsMinimised(true)} />
 
       {/* Lazy-Loaded Modals & Drawers */}
       <Suspense fallback={null}>
         {isMenuOpen && <DrawerMenu isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} />}
-        {isSOSOpen && <EmergencySOSModal isOpen={isSOSOpen} onClose={() => setIsSOSOpen(false)} />}
         {incomingRequest && <IncomingJobModal />}
       </Suspense>
     </div>

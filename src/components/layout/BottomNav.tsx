@@ -3,7 +3,6 @@ import { usePartner } from '../../context/PartnerContext';
 import { ArrowLeft, RefreshCw, Minimize2 } from 'lucide-react';
 
 interface BottomNavProps {
-  onOpenMenu?: () => void;
   onMinimize?: () => void;
 }
 

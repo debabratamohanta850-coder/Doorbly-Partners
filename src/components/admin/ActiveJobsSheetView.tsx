@@ -24,7 +24,7 @@ export const ActiveJobsSheetView: React.FC<ActiveJobsSheetViewProps> = ({
   const handleManualSynchronise = async () => {
     setIsSyncing(true);
     try {
-      const latestBookings = await supabaseService.getAllBookings();
+      const latestBookings = await supabaseService.getAllBookings(true);
       setLiveBookings(latestBookings);
       await onRefresh();
     } finally {

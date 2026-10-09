@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
 import { usePartner } from '../../context/PartnerContext';
+import { DoorblyLogoIcon } from '../../constants/branding';
 import { Bell, ShieldAlert, Menu, Power, Loader2 } from 'lucide-react';
 
 interface PartnerHeaderProps {
   onOpenMenu: () => void;
-  onOpenSOS?: () => void;
 }
 
 export const PartnerHeader: React.FC<PartnerHeaderProps> = ({ onOpenMenu }) => {
@@ -44,11 +44,7 @@ export const PartnerHeader: React.FC<PartnerHeaderProps> = ({ onOpenMenu }) => {
           >
             <Menu className="w-6 h-6 text-white" />
           </button>
-          <img
-            src="https://fktznwvrlsgmbrisyyac.supabase.co/storage/v1/object/sign/logo/logo%20(2).png?token=eyJraWQiOiJiMjQwZDFlOC0wZDVkLTQ1Y2EtYTdmYy1kNDllYWUyODljMGUiLCJhbGciOiJIUzUxMiJ9.eyJ1cmwiOiJsb2dvL2xvZ28gKDIpLnBuZyIsInNjb3BlIjoiZG93bmxvYWQiLCJpYXQiOjE3OTE1MTY5NzYsImV4cCI6MTgyMzA1Mjk3Nn0.spYpEM43vQKHvC2SnHk5V1TIobClSA7GDrhr5OxJdbw1TdrUVDAcymrwdRbHSlP_L34exW3A1zs2EF1BGYiyIQ"
-            alt="Doorbly Logo"
-            className="w-8 h-8 rounded-lg object-contain bg-white p-0.5 shadow-xs"
-          />
+          <DoorblyLogoIcon className="w-8 h-8 rounded-lg shrink-0" />
         </div>
 
         {/* Online / Offline Switch Button */}

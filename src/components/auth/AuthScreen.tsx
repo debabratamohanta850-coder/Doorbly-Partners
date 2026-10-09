@@ -3,7 +3,7 @@ import { usePartner } from '../../context/PartnerContext';
 import { partnerAuthService } from '../../services/partnerAuth';
 import { supabaseService } from '../../services/supabaseClient';
 import { PartnerProfile, PartnerMembership } from '../../types';
-import { PROFESSION_CATEGORIES } from '../profile/ServiceSelectionView';
+import { PROFESSION_CATEGORIES } from '../../constants/professions';
 import { DoorblyLogoIcon } from '../../constants/branding';
 import {
   ShieldCheck,

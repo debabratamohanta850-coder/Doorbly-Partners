@@ -13,6 +13,7 @@ import {
   OfferOfTheDay,
   PartnerKYC
 } from '../types';
+import { supabaseDataEngine } from './supabaseDataEngine';
 
 export interface SupabaseConfig {
   url: string;
@@ -21,7 +22,6 @@ export interface SupabaseConfig {
 }
 
 const STORAGE_KEY_CONFIG = 'doorbly_supabase_config_v2';
-const STORAGE_KEY_PARTNER_SESSION = 'doorbly_partner_session_v1';
 const STORAGE_KEY_STORE_DATA = 'doorbly_partner_local_store_v1';
 const STORAGE_KEY_DAILY_OFFER = 'doorbly_offer_of_the_day_v1';
 
@@ -42,6 +42,16 @@ const DEFAULT_SUPABASE_ANON_KEY =
 class SupabaseService {
   private client: SupabaseClient | null = null;
   private channel: RealtimeChannel | null = null;
+  private localStoreMemoryCache: {
+    partners: Record<string, PartnerProfile>;
+    memberships: Record<string, PartnerMembership>;
+    bookings: Record<string, ServiceBooking>;
+    transactions: Record<string, WalletTransaction[]>;
+    withdrawals: Record<string, WithdrawalRequest[]>;
+    notifications: Record<string, NotificationItem[]>;
+    tickets: Record<string, SupportTicket[]>;
+  } | null = null;
+
   private config: SupabaseConfig = {
     url: DEFAULT_SUPABASE_URL,
     anonKey: DEFAULT_SUPABASE_ANON_KEY,
@@ -50,6 +60,26 @@ class SupabaseService {
 
   constructor() {
     this.initClient();
+  }
+
+  private createFastClient(url: string, key: string): SupabaseClient {
+    return createClient(url, key, {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true
+      },
+      realtime: {
+        params: {
+          eventsPerSecond: 40
+        }
+      },
+      global: {
+        fetch: supabaseDataEngine.turboFetch,
+        headers: {
+          'x-client-info': 'doorbly-turbo-engine/2.0'
+        }
+      }
+    });
   }
 
   private initClient(): void {
@@ -75,12 +105,7 @@ class SupabaseService {
 
     if (activeUrl && activeKey && activeUrl.startsWith('http')) {
       try {
-        this.client = createClient(activeUrl, activeKey, {
-          auth: {
-            persistSession: true,
-            autoRefreshToken: true
-          }
-        });
+        this.client = this.createFastClient(activeUrl, activeKey);
         this.config = { url: activeUrl, anonKey: activeKey, connected: true };
       } catch (err) {
         console.warn('Failed to initialize Supabase client:', err);
@@ -98,10 +123,9 @@ class SupabaseService {
   public setConfig(url: string, anonKey: string): boolean {
     try {
       localStorage.setItem(STORAGE_KEY_CONFIG, JSON.stringify({ url, anonKey }));
+      supabaseDataEngine.clearCache();
       if (url && anonKey) {
-        this.client = createClient(url, anonKey, {
-          auth: { persistSession: true, autoRefreshToken: true }
-        });
+        this.client = this.createFastClient(url, anonKey);
         this.config = { url, anonKey, connected: true };
         return true;
       } else {
@@ -115,48 +139,51 @@ class SupabaseService {
     }
   }
 
-  public async testConnection(): Promise<{ success: boolean; message: string }> {
+  public async testConnection(): Promise<{ success: boolean; message: string; latencyMs?: number }> {
     if (!this.client) {
       return { success: false, message: 'Supabase URL and Anon Key are not configured.' };
     }
+    const start = performance.now();
     try {
-      // Test basic ping by selecting from doorbly_partners or auth
-      const { error } = await this.client.from('doorbly_partners').select('id').limit(1);
+      const { error } = await supabaseDataEngine.executeWrite(async () => {
+        return await this.client!.from('doorbly_partners').select('id').limit(1);
+      });
+      const latencyMs = Math.max(1, Math.round(performance.now() - start));
       if (error && error.code !== 'PGRST116') {
-        // Table might not exist yet or permission issue
         if (error.message.includes('relation "doorbly_partners" does not exist')) {
           return {
             success: true,
-            message: 'Connected to Supabase! (Tables need to be created with the SQL setup schema).'
+            latencyMs,
+            message: `Connected to Supabase in ${latencyMs}ms! (Tables need to be created).`
           };
         }
-        return { success: false, message: error.message };
+        return { success: false, latencyMs, message: error.message };
       }
-      return { success: true, message: 'Successfully connected to Doorbly Supabase database!' };
+      return {
+        success: true,
+        latencyMs,
+        message: `Connected to Doorbly Supabase via Fast Data Engine (${latencyMs}ms)!`
+      };
     } catch (e: unknown) {
       return { success: false, message: e instanceof Error ? e.message : 'Unknown connection error' };
     }
   }
 
-  // Local storage backup persistence layer for verified real-time simulation / offline state
-  private getLocalStore(): {
-    partners: Record<string, PartnerProfile>;
-    memberships: Record<string, PartnerMembership>;
-    bookings: Record<string, ServiceBooking>;
-    transactions: Record<string, WalletTransaction[]>;
-    withdrawals: Record<string, WithdrawalRequest[]>;
-    notifications: Record<string, NotificationItem[]>;
-    tickets: Record<string, SupportTicket[]>;
-  } {
+  // In-memory + LocalStorage persistence layer for zero-latency reads & offline resilience
+  private getLocalStore() {
+    if (this.localStoreMemoryCache) {
+      return this.localStoreMemoryCache;
+    }
     try {
       const data = localStorage.getItem(STORAGE_KEY_STORE_DATA);
       if (data) {
-        return JSON.parse(data);
+        this.localStoreMemoryCache = JSON.parse(data);
+        return this.localStoreMemoryCache!;
       }
     } catch {
       // ignore
     }
-    return {
+    this.localStoreMemoryCache = {
       partners: {},
       memberships: {},
       bookings: {},
@@ -165,9 +192,11 @@ class SupabaseService {
       notifications: {},
       tickets: {}
     };
+    return this.localStoreMemoryCache;
   }
 
   private saveLocalStore(data: ReturnType<typeof this.getLocalStore>): void {
+    this.localStoreMemoryCache = data;
     try {
       localStorage.setItem(STORAGE_KEY_STORE_DATA, JSON.stringify(data));
     } catch (e) {
@@ -176,26 +205,37 @@ class SupabaseService {
   }
 
   /**
-   * Fetch partner profile
+   * Fetch partner profile with L1 SWR Cache & In-Flight Request Coalescing
    */
-  public async getPartnerProfile(partnerId: string): Promise<PartnerProfile | null> {
-    if (this.client) {
-      try {
-        const { data, error } = await this.client
-          .from('doorbly_partners')
-          .select('*')
-          .eq('id', partnerId)
-          .maybeSingle();
+  public async getPartnerProfile(partnerId: string, forceRefresh = false): Promise<PartnerProfile | null> {
+    return supabaseDataEngine.fetchWithEngine(
+      `profile:${partnerId}`,
+      async () => {
+        if (this.client) {
+          try {
+            const { data, error } = await this.client
+              .from('doorbly_partners')
+              .select('*')
+              .eq('id', partnerId)
+              .maybeSingle();
 
-        if (error) console.warn('Supabase getPartnerProfile error:', error);
-        if (data) return data as PartnerProfile;
-      } catch (err) {
-        console.warn('Supabase fetch failed, falling back:', err);
-      }
-    }
+            if (error) console.warn('Supabase getPartnerProfile error:', error);
+            if (data) {
+              const store = this.getLocalStore();
+              store.partners[partnerId] = data as PartnerProfile;
+              this.saveLocalStore(store);
+              return data as PartnerProfile;
+            }
+          } catch (err) {
+            console.warn('Supabase fetch failed, falling back:', err);
+          }
+        }
 
-    const store = this.getLocalStore();
-    return store.partners[partnerId] || null;
+        const store = this.getLocalStore();
+        return store.partners[partnerId] || null;
+      },
+      { forceRefresh }
+    );
   }
 
   /**
@@ -255,25 +295,31 @@ class SupabaseService {
   }
 
   /**
-   * Save or update partner profile
+   * Save or update partner profile with optimistic L1 cache priming
    */
   public async upsertPartnerProfile(profile: PartnerProfile): Promise<PartnerProfile> {
     profile.updated_at = new Date().toISOString();
+    supabaseDataEngine.primeCache(`profile:${profile.id}`, profile);
 
     if (this.client) {
       try {
-        const { data, error } = await this.client
-          .from('doorbly_partners')
-          .upsert(profile)
-          .select()
-          .maybeSingle();
+        const { data, error } = await supabaseDataEngine.executeWrite(
+          async () =>
+            await this.client!
+              .from('doorbly_partners')
+              .upsert(profile)
+              .select()
+              .maybeSingle(),
+          ['admin:partners']
+        );
 
         if (!error && data) {
-          // Cache locally
+          const saved = data as PartnerProfile;
+          supabaseDataEngine.primeCache(`profile:${profile.id}`, saved);
           const store = this.getLocalStore();
-          store.partners[profile.id] = data as PartnerProfile;
+          store.partners[profile.id] = saved;
           this.saveLocalStore(store);
-          return data as PartnerProfile;
+          return saved;
         }
       } catch (e) {
         console.warn('Supabase upsert error:', e);
@@ -287,7 +333,7 @@ class SupabaseService {
   }
 
   /**
-   * Update partner live availability and location
+   * Update partner live availability and location with non-blocking write-behind coalescing for GPS heartbeats
    */
   public async updatePartnerAvailability(
     partnerId: string,
@@ -302,25 +348,21 @@ class SupabaseService {
       }
     }
 
+    const nowIso = new Date().toISOString();
     const updateData: Partial<PartnerProfile> = {
       is_online: isOnline,
-      last_location_update: new Date().toISOString(),
-      updated_at: new Date().toISOString()
+      last_location_update: nowIso,
+      updated_at: nowIso
     };
     if (lat !== undefined && lng !== undefined) {
       updateData.current_lat = lat;
       updateData.current_lng = lng;
     }
 
-    if (this.client) {
-      try {
-        await this.client
-          .from('doorbly_partners')
-          .update(updateData)
-          .eq('id', partnerId);
-      } catch (e) {
-        console.warn('Failed to update availability on Supabase:', e);
-      }
+    // Optimistic local + L1 cache update immediately (0ms UI latency)
+    const cachedProfile = supabaseDataEngine.peekCache<PartnerProfile>(`profile:${partnerId}`);
+    if (cachedProfile) {
+      supabaseDataEngine.primeCache(`profile:${partnerId}`, { ...cachedProfile, ...updateData });
     }
 
     const store = this.getLocalStore();
@@ -331,47 +373,82 @@ class SupabaseService {
       };
       this.saveLocalStore(store);
     }
+
+    if (this.client) {
+      const writeFn = async () => {
+        await this.client!
+          .from('doorbly_partners')
+          .update(updateData)
+          .eq('id', partnerId);
+      };
+
+      // If this is a continuous GPS coordinate update while online, coalesce writes via the engine
+      if (isOnline && lat !== undefined && lng !== undefined) {
+        supabaseDataEngine.scheduleCoalescedWrite(`availability:${partnerId}`, writeFn);
+      } else {
+        try {
+          await supabaseDataEngine.executeWrite(writeFn, ['admin:partners']);
+        } catch (e) {
+          console.warn('Failed to update availability on Supabase:', e);
+        }
+      }
+    }
   }
 
   /**
-   * Get Partner Membership status
+   * Get Partner Membership status (L1 SWR cached)
    */
   public async getMembership(partnerId: string): Promise<PartnerMembership | null> {
-    if (this.client) {
-      try {
-        const { data, error } = await this.client
-          .from('doorbly_partner_memberships')
-          .select('*')
-          .eq('partner_id', partnerId)
-          .maybeSingle();
+    return supabaseDataEngine.fetchWithEngine(`membership:${partnerId}`, async () => {
+      if (this.client) {
+        try {
+          const { data, error } = await this.client
+            .from('doorbly_partner_memberships')
+            .select('*')
+            .eq('partner_id', partnerId)
+            .maybeSingle();
 
-        if (!error && data) return data as PartnerMembership;
-      } catch (e) {
-        console.warn('Supabase getMembership error:', e);
+          if (!error && data) {
+            const store = this.getLocalStore();
+            store.memberships[partnerId] = data as PartnerMembership;
+            this.saveLocalStore(store);
+            return data as PartnerMembership;
+          }
+        } catch (e) {
+          console.warn('Supabase getMembership error:', e);
+        }
       }
-    }
 
-    const store = this.getLocalStore();
-    return store.memberships[partnerId] || null;
+      const store = this.getLocalStore();
+      return store.memberships[partnerId] || null;
+    });
   }
 
   /**
    * Subscribe/Renew Membership
    */
   public async updateMembership(membership: PartnerMembership): Promise<PartnerMembership> {
+    supabaseDataEngine.primeCache(`membership:${membership.partner_id}`, membership);
+
     if (this.client) {
       try {
-        const { data, error } = await this.client
-          .from('doorbly_partner_memberships')
-          .upsert(membership)
-          .select()
-          .maybeSingle();
+        const { data, error } = await supabaseDataEngine.executeWrite(
+          async () =>
+            await this.client!
+              .from('doorbly_partner_memberships')
+              .upsert(membership)
+              .select()
+              .maybeSingle(),
+          ['admin:memberships']
+        );
 
         if (!error && data) {
+          const saved = data as PartnerMembership;
+          supabaseDataEngine.primeCache(`membership:${membership.partner_id}`, saved);
           const store = this.getLocalStore();
-          store.memberships[membership.partner_id] = data as PartnerMembership;
+          store.memberships[membership.partner_id] = saved;
           this.saveLocalStore(store);
-          return data as PartnerMembership;
+          return saved;
         }
       } catch (e) {
         console.warn('Failed to update membership in Supabase:', e);
@@ -385,150 +462,153 @@ class SupabaseService {
   }
 
   /**
-   * Fetch partner wallet summary (returns 0 if no real data)
+   * Fetch partner wallet summary with projected lightweight column selection & L1 caching
    */
   public async getWalletSummary(partnerId: string): Promise<WalletSummary> {
-    let available_balance = 0;
-    let pending_amount = 0;
-    let today_earnings = 0;
-    let week_earnings = 0;
-    let month_earnings = 0;
-    let today_completed_jobs = 0;
-    let total_completed_jobs = 0;
+    return supabaseDataEngine.fetchWithEngine(`wallet:${partnerId}`, async () => {
+      let available_balance = 0;
+      let pending_amount = 0;
+      let today_earnings = 0;
+      let week_earnings = 0;
+      let month_earnings = 0;
+      let today_completed_jobs = 0;
+      let total_completed_jobs = 0;
 
-    const todayDateStr = new Date().toISOString().split('T')[0];
-    const sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString();
-    const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString();
+      const todayDateStr = new Date().toISOString().split('T')[0];
+      const sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString();
+      const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString();
 
-    if (this.client) {
-      try {
-        const [{ data: walletData }, { data: txData }, { data: jobs }] = await Promise.all([
-          this.client
-            .from('doorbly_partner_wallets')
-            .select('*')
-            .eq('partner_id', partnerId)
-            .maybeSingle(),
-          this.client
-            .from('doorbly_partner_wallet_transactions')
-            .select('type, amount, status')
-            .eq('partner_id', partnerId),
-          this.client
-            .from('doorbly_service_bookings')
-            .select('*')
-            .eq('assigned_partner_id', partnerId)
-            .eq('status', 'COMPLETED')
-        ]);
+      if (this.client) {
+        try {
+          const [{ data: walletData }, { data: txData }, { data: jobs }] = await Promise.all([
+            this.client
+              .from('doorbly_partner_wallets')
+              .select('available_balance, pending_amount')
+              .eq('partner_id', partnerId)
+              .maybeSingle(),
+            this.client
+              .from('doorbly_partner_wallet_transactions')
+              .select('type, amount, status')
+              .eq('partner_id', partnerId),
+            this.client
+              .from('doorbly_service_bookings')
+              .select('partner_earning, completed_at, created_at')
+              .eq('assigned_partner_id', partnerId)
+              .eq('status', 'COMPLETED')
+          ]);
 
-        if (walletData) {
-          available_balance = Number(walletData.available_balance) || 0;
-          pending_amount = Number(walletData.pending_amount) || 0;
-        } else if (txData && txData.length > 0) {
-          txData.forEach((tx) => {
-            if (tx.status === 'completed') {
-              if (tx.type === 'credit') available_balance += Number(tx.amount) || 0;
-              if (tx.type === 'debit') available_balance -= Number(tx.amount) || 0;
-            }
-          });
-          if (available_balance < 0) available_balance = 0;
+          if (walletData) {
+            available_balance = Number(walletData.available_balance) || 0;
+            pending_amount = Number(walletData.pending_amount) || 0;
+          } else if (txData && txData.length > 0) {
+            txData.forEach((tx) => {
+              if (tx.status === 'completed') {
+                if (tx.type === 'credit') available_balance += Number(tx.amount) || 0;
+                if (tx.type === 'debit') available_balance -= Number(tx.amount) || 0;
+              }
+            });
+            if (available_balance < 0) available_balance = 0;
+          }
+
+          if (jobs && jobs.length > 0) {
+            total_completed_jobs = jobs.length;
+            jobs.forEach((job) => {
+              const earning = Number(job.partner_earning) || 0;
+              const completedAt = job.completed_at || job.created_at;
+              if (completedAt.startsWith(todayDateStr)) {
+                today_earnings += earning;
+                today_completed_jobs += 1;
+              }
+              if (completedAt >= sevenDaysAgo) {
+                week_earnings += earning;
+              }
+              if (completedAt >= thirtyDaysAgo) {
+                month_earnings += earning;
+              }
+            });
+          }
+
+          return {
+            available_balance,
+            pending_amount,
+            today_earnings,
+            week_earnings,
+            month_earnings,
+            today_completed_jobs,
+            total_completed_jobs
+          };
+        } catch (e) {
+          console.warn('Supabase getWalletSummary error:', e);
         }
+      }
 
-        if (jobs && jobs.length > 0) {
-          total_completed_jobs = jobs.length;
-          jobs.forEach((job) => {
-            const earning = Number(job.partner_earning) || 0;
-            const completedAt = job.completed_at || job.created_at;
-            if (completedAt.startsWith(todayDateStr)) {
-              today_earnings += earning;
-              today_completed_jobs += 1;
-            }
-            if (completedAt >= sevenDaysAgo) {
-              week_earnings += earning;
-            }
-            if (completedAt >= thirtyDaysAgo) {
-              month_earnings += earning;
-            }
-          });
+      // Local fallback
+      const store = this.getLocalStore();
+      const txList = store.transactions[partnerId] || [];
+      const jobs = Object.values(store.bookings).filter(
+        b => b.assigned_partner_id === partnerId && b.status === 'COMPLETED'
+      );
+
+      total_completed_jobs = jobs.length;
+      jobs.forEach((job) => {
+        const earning = Number(job.partner_earning) || 0;
+        const completedAt = job.completed_at || job.created_at;
+        if (completedAt.startsWith(todayDateStr)) {
+          today_earnings += earning;
+          today_completed_jobs += 1;
         }
+        if (completedAt >= sevenDaysAgo) {
+          week_earnings += earning;
+        }
+        if (completedAt >= thirtyDaysAgo) {
+          month_earnings += earning;
+        }
+      });
 
-        return {
-          available_balance,
-          pending_amount,
-          today_earnings,
-          week_earnings,
-          month_earnings,
-          today_completed_jobs,
-          total_completed_jobs
-        };
-      } catch (e) {
-        console.warn('Supabase getWalletSummary error:', e);
-      }
-    }
+      txList.forEach((tx) => {
+        if (tx.status === 'completed') {
+          if (tx.type === 'credit') available_balance += tx.amount;
+          if (tx.type === 'debit') available_balance -= tx.amount;
+        }
+      });
+      if (available_balance < 0) available_balance = 0;
 
-    // Local fallback
-    const store = this.getLocalStore();
-    const txList = store.transactions[partnerId] || [];
-    const jobs = Object.values(store.bookings).filter(
-      b => b.assigned_partner_id === partnerId && b.status === 'COMPLETED'
-    );
-
-    total_completed_jobs = jobs.length;
-    jobs.forEach((job) => {
-      const earning = Number(job.partner_earning) || 0;
-      const completedAt = job.completed_at || job.created_at;
-      if (completedAt.startsWith(todayDateStr)) {
-        today_earnings += earning;
-        today_completed_jobs += 1;
-      }
-      if (completedAt >= sevenDaysAgo) {
-        week_earnings += earning;
-      }
-      if (completedAt >= thirtyDaysAgo) {
-        month_earnings += earning;
-      }
+      return {
+        available_balance,
+        pending_amount,
+        today_earnings,
+        week_earnings,
+        month_earnings,
+        today_completed_jobs,
+        total_completed_jobs
+      };
     });
-
-    // Calculate balance from completed transactions
-    txList.forEach((tx) => {
-      if (tx.status === 'completed') {
-        if (tx.type === 'credit') available_balance += tx.amount;
-        if (tx.type === 'debit') available_balance -= tx.amount;
-      }
-    });
-    if (available_balance < 0) available_balance = 0;
-
-    return {
-      available_balance,
-      pending_amount,
-      today_earnings,
-      week_earnings,
-      month_earnings,
-      today_completed_jobs,
-      total_completed_jobs
-    };
   }
 
   /**
    * Fetch wallet transactions
    */
   public async getTransactions(partnerId: string): Promise<WalletTransaction[]> {
-    if (this.client) {
-      try {
-        const { data, error } = await this.client
-          .from('doorbly_partner_wallet_transactions')
-          .select('*')
-          .eq('partner_id', partnerId)
-          .order('created_at', { ascending: false });
+    return supabaseDataEngine.fetchWithEngine(`transactions:${partnerId}`, async () => {
+      if (this.client) {
+        try {
+          const { data, error } = await this.client
+            .from('doorbly_partner_wallet_transactions')
+            .select('*')
+            .eq('partner_id', partnerId)
+            .order('created_at', { ascending: false });
 
-        if (!error && data) return data as WalletTransaction[];
-      } catch (e) {
-        console.warn('Supabase getTransactions error:', e);
+          if (!error && data) return data as WalletTransaction[];
+        } catch (e) {
+          console.warn('Supabase getTransactions error:', e);
+        }
       }
-    }
 
-    const store = this.getLocalStore();
-    return (store.transactions[partnerId] || []).sort(
-      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-    );
+      const store = this.getLocalStore();
+      return (store.transactions[partnerId] || []).sort(
+        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      );
+    });
   }
 
   /**
@@ -568,17 +648,20 @@ class SupabaseService {
 
     if (this.client) {
       try {
-        const { data, error } = await this.client
-          .from('doorbly_partner_withdrawals')
-          .insert(newWithdrawal)
-          .select()
-          .maybeSingle();
+        const { data, error } = await supabaseDataEngine.executeWrite(
+          async () =>
+            await this.client!
+              .from('doorbly_partner_withdrawals')
+              .insert(newWithdrawal)
+              .select()
+              .maybeSingle(),
+          [`wallet:${partnerId}`, `withdrawals:${partnerId}`, `transactions:${partnerId}`, 'admin:withdrawals']
+        );
 
         if (error) {
           return { success: false, message: error.message };
         }
         if (data) {
-          // Record debit transaction in Supabase (trigger updates doorbly_partner_wallets)
           await this.client.from('doorbly_partner_wallet_transactions').insert({
             id: `tx_wth_${Date.now()}`,
             partner_id: partnerId,
@@ -590,6 +673,8 @@ class SupabaseService {
             status: 'completed',
             created_at: new Date().toISOString()
           });
+          supabaseDataEngine.invalidate(`wallet:${partnerId}`);
+          supabaseDataEngine.invalidate(`transactions:${partnerId}`);
           return { success: true, message: 'Withdrawal request submitted successfully.', withdrawal: data as WithdrawalRequest };
         }
       } catch (e: unknown) {
@@ -601,7 +686,6 @@ class SupabaseService {
     if (!store.withdrawals[partnerId]) store.withdrawals[partnerId] = [];
     store.withdrawals[partnerId].unshift(newWithdrawal);
 
-    // Create pending debit transaction
     const debitTx: WalletTransaction = {
       id: `tx_${Date.now()}`,
       partner_id: partnerId,
@@ -617,6 +701,9 @@ class SupabaseService {
     store.transactions[partnerId].unshift(debitTx);
 
     this.saveLocalStore(store);
+    supabaseDataEngine.invalidate(`wallet:${partnerId}`);
+    supabaseDataEngine.invalidate(`withdrawals:${partnerId}`);
+    supabaseDataEngine.invalidate(`transactions:${partnerId}`);
     return { success: true, message: 'Withdrawal request submitted successfully.', withdrawal: newWithdrawal };
   }
 
@@ -624,104 +711,121 @@ class SupabaseService {
    * Get withdrawals for partner
    */
   public async getWithdrawals(partnerId: string): Promise<WithdrawalRequest[]> {
-    if (this.client) {
-      try {
-        const { data, error } = await this.client
-          .from('doorbly_partner_withdrawals')
-          .select('*')
-          .eq('partner_id', partnerId)
-          .order('requested_at', { ascending: false });
+    return supabaseDataEngine.fetchWithEngine(`withdrawals:${partnerId}`, async () => {
+      if (this.client) {
+        try {
+          const { data, error } = await this.client
+            .from('doorbly_partner_withdrawals')
+            .select('*')
+            .eq('partner_id', partnerId)
+            .order('requested_at', { ascending: false });
 
-        if (!error && data) return data as WithdrawalRequest[];
-      } catch (e) {
-        console.warn('Supabase getWithdrawals error:', e);
+          if (!error && data) return data as WithdrawalRequest[];
+        } catch (e) {
+          console.warn('Supabase getWithdrawals error:', e);
+        }
       }
-    }
 
-    const store = this.getLocalStore();
-    return store.withdrawals[partnerId] || [];
+      const store = this.getLocalStore();
+      return store.withdrawals[partnerId] || [];
+    });
   }
 
   /**
-   * Fetch partner jobs (Active, Completed, Cancelled)
+   * Fetch partner jobs (Active, Completed, Cancelled) with L1 SWR caching
    */
   public async getPartnerJobs(partnerId: string): Promise<ServiceBooking[]> {
-    if (this.client) {
-      try {
-        const { data, error } = await this.client
-          .from('doorbly_service_bookings')
-          .select('*')
-          .eq('assigned_partner_id', partnerId)
-          .order('created_at', { ascending: false });
+    return supabaseDataEngine.fetchWithEngine(`jobs:${partnerId}`, async () => {
+      if (this.client) {
+        try {
+          const { data, error } = await this.client
+            .from('doorbly_service_bookings')
+            .select('*')
+            .eq('assigned_partner_id', partnerId)
+            .order('created_at', { ascending: false });
 
-        if (!error && data) return data as ServiceBooking[];
-      } catch (e) {
-        console.warn('Supabase getPartnerJobs error:', e);
+          if (!error && data) return data as ServiceBooking[];
+        } catch (e) {
+          console.warn('Supabase getPartnerJobs error:', e);
+        }
       }
-    }
 
-    const store = this.getLocalStore();
-    return Object.values(store.bookings)
-      .filter(b => b.assigned_partner_id === partnerId)
-      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      const store = this.getLocalStore();
+      return Object.values(store.bookings)
+        .filter(b => b.assigned_partner_id === partnerId)
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    });
   }
 
   /**
-   * Check for currently active job assigned to partner
+   * Check for currently active job assigned to partner (reuses cached partner jobs if fresh)
    */
   public async getActiveJob(partnerId: string): Promise<ServiceBooking | null> {
     const activeStatuses: BookingStatus[] = ['ASSIGNED', 'ARRIVED', 'IN_PROGRESS'];
 
-    if (this.client) {
-      try {
-        const { data, error } = await this.client
-          .from('doorbly_service_bookings')
-          .select('*')
-          .eq('assigned_partner_id', partnerId)
-          .in('status', activeStatuses)
-          .maybeSingle();
-
-        if (!error && data) return data as ServiceBooking;
-      } catch (e) {
-        console.warn('Supabase getActiveJob error:', e);
-      }
+    const cachedJobs = supabaseDataEngine.peekCache<ServiceBooking[]>(`jobs:${partnerId}`);
+    if (cachedJobs) {
+      return cachedJobs.find(b => activeStatuses.includes(b.status)) || null;
     }
 
-    const store = this.getLocalStore();
-    const active = Object.values(store.bookings).find(
-      b => b.assigned_partner_id === partnerId && activeStatuses.includes(b.status)
-    );
-    return active || null;
+    return supabaseDataEngine.fetchWithEngine(`activeJob:${partnerId}`, async () => {
+      if (this.client) {
+        try {
+          const { data, error } = await this.client
+            .from('doorbly_service_bookings')
+            .select('*')
+            .eq('assigned_partner_id', partnerId)
+            .in('status', activeStatuses)
+            .maybeSingle();
+
+          if (!error && data) return data as ServiceBooking;
+        } catch (e) {
+          console.warn('Supabase getActiveJob error:', e);
+        }
+      }
+
+      const store = this.getLocalStore();
+      const active = Object.values(store.bookings).find(
+        b => b.assigned_partner_id === partnerId && activeStatuses.includes(b.status)
+      );
+      return active || null;
+    });
   }
 
   /**
    * Poll for live open job requests (SEARCHING_PARTNER / REQUEST_SENT)
-   * Used by the adaptive polling loop (5s normal vs 30s battery-saving mode)
+   * Deduplicated via Fast Data Engine with a short 2.5s TTL so rapid polls don't flood the network
    */
   public async pollOpenJobRequests(): Promise<ServiceBooking[]> {
     const openStatuses: BookingStatus[] = ['SEARCHING_PARTNER', 'REQUEST_SENT'];
 
-    if (this.client) {
-      try {
-        const { data, error } = await this.client
-          .from('doorbly_service_bookings')
-          .select('*')
-          .in('status', openStatuses)
-          .order('created_at', { ascending: false })
-          .limit(10);
+    return supabaseDataEngine.fetchWithEngine(
+      'openJobRequests',
+      async () => {
+        if (this.client) {
+          try {
+            const { data, error } = await this.client
+              .from('doorbly_service_bookings')
+              .select('*')
+              .in('status', openStatuses)
+              .order('created_at', { ascending: false })
+              .limit(10);
 
-        if (!error && data) {
-          return data as ServiceBooking[];
+            if (!error && data) {
+              return data as ServiceBooking[];
+            }
+          } catch (e) {
+            console.warn('Supabase pollOpenJobRequests notice:', e);
+          }
         }
-      } catch (e) {
-        console.warn('Supabase pollOpenJobRequests notice:', e);
-      }
-    }
 
-    const store = this.getLocalStore();
-    return Object.values(store.bookings)
-      .filter(b => openStatuses.includes(b.status))
-      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+        const store = this.getLocalStore();
+        return Object.values(store.bookings)
+          .filter(b => openStatuses.includes(b.status))
+          .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      },
+      { ttlMs: 2500, staleWhileRevalidate: false }
+    );
   }
 
   /**
@@ -736,48 +840,54 @@ class SupabaseService {
     const queueOpenStatuses: BookingStatus[] = ['SEARCHING_PARTNER', 'REQUEST_SENT'];
     const partnerUpcomingStatuses: BookingStatus[] = ['ASSIGNED', 'ARRIVED', 'IN_PROGRESS'];
 
-    if (this.client) {
-      try {
-        const [doneRes, openQueueRes, assignedQueueRes] = await Promise.all([
-          this.client
-            .from('doorbly_service_bookings')
-            .select('id', { count: 'exact', head: true })
-            .eq('assigned_partner_id', partnerId)
-            .eq('status', 'COMPLETED'),
-          this.client
-            .from('doorbly_service_bookings')
-            .select('id', { count: 'exact', head: true })
-            .in('status', queueOpenStatuses),
-          this.client
-            .from('doorbly_service_bookings')
-            .select('id', { count: 'exact', head: true })
-            .eq('assigned_partner_id', partnerId)
-            .in('status', partnerUpcomingStatuses)
-        ]);
+    return supabaseDataEngine.fetchWithEngine(
+      `workCounts:${partnerId}`,
+      async () => {
+        if (this.client) {
+          try {
+            const [doneRes, openQueueRes, assignedQueueRes] = await Promise.all([
+              this.client
+                .from('doorbly_service_bookings')
+                .select('id', { count: 'exact', head: true })
+                .eq('assigned_partner_id', partnerId)
+                .eq('status', 'COMPLETED'),
+              this.client
+                .from('doorbly_service_bookings')
+                .select('id', { count: 'exact', head: true })
+                .in('status', queueOpenStatuses),
+              this.client
+                .from('doorbly_service_bookings')
+                .select('id', { count: 'exact', head: true })
+                .eq('assigned_partner_id', partnerId)
+                .in('status', partnerUpcomingStatuses)
+            ]);
 
-        if (!doneRes.error && !openQueueRes.error && !assignedQueueRes.error) {
-          return {
-            worksDone: doneRes.count ?? 0,
-            upcomingQueue: (openQueueRes.count ?? 0) + (assignedQueueRes.count ?? 0)
-          };
+            if (!doneRes.error && !openQueueRes.error && !assignedQueueRes.error) {
+              return {
+                worksDone: doneRes.count ?? 0,
+                upcomingQueue: (openQueueRes.count ?? 0) + (assignedQueueRes.count ?? 0)
+              };
+            }
+          } catch (e) {
+            console.warn('Supabase getLiveWorkCounts error:', e);
+          }
         }
-      } catch (e) {
-        console.warn('Supabase getLiveWorkCounts error:', e);
-      }
-    }
 
-    const store = this.getLocalStore();
-    const allBookings = Object.values(store.bookings);
-    const worksDone = allBookings.filter(
-      b => b.assigned_partner_id === partnerId && b.status === 'COMPLETED'
-    ).length;
-    const upcomingQueue = allBookings.filter(
-      b =>
-        queueOpenStatuses.includes(b.status) ||
-        (b.assigned_partner_id === partnerId && partnerUpcomingStatuses.includes(b.status))
-    ).length;
+        const store = this.getLocalStore();
+        const allBookings = Object.values(store.bookings);
+        const worksDone = allBookings.filter(
+          b => b.assigned_partner_id === partnerId && b.status === 'COMPLETED'
+        ).length;
+        const upcomingQueue = allBookings.filter(
+          b =>
+            queueOpenStatuses.includes(b.status) ||
+            (b.assigned_partner_id === partnerId && partnerUpcomingStatuses.includes(b.status))
+        ).length;
 
-    return { worksDone, upcomingQueue };
+        return { worksDone, upcomingQueue };
+      },
+      { ttlMs: 4000 }
+    );
   }
 
   /**
@@ -790,18 +900,21 @@ class SupabaseService {
   ): Promise<{ success: boolean; message: string; booking?: ServiceBooking }> {
     if (this.client) {
       try {
-        // Atomic update: only update if status is SEARCHING_PARTNER or REQUEST_SENT
-        const { data, error } = await this.client
-          .from('doorbly_service_bookings')
-          .update({
-            status: 'ASSIGNED',
-            assigned_partner_id: partnerId,
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', bookingId)
-          .in('status', ['SEARCHING_PARTNER', 'REQUEST_SENT'])
-          .select()
-          .maybeSingle();
+        const { data, error } = await supabaseDataEngine.executeWrite(
+          async () =>
+            await this.client!
+              .from('doorbly_service_bookings')
+              .update({
+                status: 'ASSIGNED',
+                assigned_partner_id: partnerId,
+                updated_at: new Date().toISOString()
+              })
+              .eq('id', bookingId)
+              .in('status', ['SEARCHING_PARTNER', 'REQUEST_SENT'])
+              .select()
+              .maybeSingle(),
+          [`jobs:${partnerId}`, `activeJob:${partnerId}`, `workCounts:${partnerId}`, 'openJobRequests', 'admin:bookings']
+        );
 
         if (error || !data) {
           return {
@@ -810,10 +923,13 @@ class SupabaseService {
           };
         }
 
+        const acceptedBooking = data as ServiceBooking;
+        supabaseDataEngine.primeCache(`activeJob:${partnerId}`, acceptedBooking);
+
         return {
           success: true,
           message: 'Service accepted successfully!',
-          booking: data as ServiceBooking
+          booking: acceptedBooking
         };
       } catch (err: unknown) {
         return {
@@ -840,6 +956,10 @@ class SupabaseService {
     target.assigned_partner_id = partnerId;
     store.bookings[bookingId] = target;
     this.saveLocalStore(store);
+
+    supabaseDataEngine.invalidate(`jobs:${partnerId}`);
+    supabaseDataEngine.invalidate('openJobRequests');
+    supabaseDataEngine.primeCache(`activeJob:${partnerId}`, target);
 
     return {
       success: true,
@@ -876,20 +996,34 @@ class SupabaseService {
 
     if (this.client) {
       try {
-        const { data, error } = await this.client
-          .from('doorbly_service_bookings')
-          .update(updatePayload)
-          .eq('id', bookingId)
-          .eq('assigned_partner_id', partnerId)
-          .select()
-          .maybeSingle();
+        const { data, error } = await supabaseDataEngine.executeWrite(
+          async () =>
+            await this.client!
+              .from('doorbly_service_bookings')
+              .update(updatePayload)
+              .eq('id', bookingId)
+              .eq('assigned_partner_id', partnerId)
+              .select()
+              .maybeSingle(),
+          [
+            `jobs:${partnerId}`,
+            `activeJob:${partnerId}`,
+            `workCounts:${partnerId}`,
+            `wallet:${partnerId}`,
+            'admin:bookings'
+          ]
+        );
 
         if (error) {
           return { success: false, message: error.message };
         }
         if (data && status === 'COMPLETED') {
-          // Credit partner wallet
           await this.creditPartnerEarnings(partnerId, data as ServiceBooking);
+          supabaseDataEngine.invalidate(`wallet:${partnerId}`);
+          supabaseDataEngine.invalidate(`transactions:${partnerId}`);
+          supabaseDataEngine.invalidate(`notifications:${partnerId}`);
+        } else if (data) {
+          supabaseDataEngine.primeCache(`activeJob:${partnerId}`, data as ServiceBooking);
         }
         return { success: true, message: `Status updated to ${status}`, booking: data as ServiceBooking };
       } catch (e: unknown) {
@@ -911,7 +1045,6 @@ class SupabaseService {
     store.bookings[bookingId] = job;
 
     if (status === 'COMPLETED') {
-      // Credit wallet
       const walletSummary = await this.getWalletSummary(partnerId);
       const creditTx: WalletTransaction = {
         id: `tx_cred_${Date.now()}`,
@@ -928,7 +1061,6 @@ class SupabaseService {
       if (!store.transactions[partnerId]) store.transactions[partnerId] = [];
       store.transactions[partnerId].unshift(creditTx);
 
-      // Create notification
       const notif: NotificationItem = {
         id: `notif_${Date.now()}`,
         partner_id: partnerId,
@@ -943,6 +1075,10 @@ class SupabaseService {
     }
 
     this.saveLocalStore(store);
+    supabaseDataEngine.invalidate(`jobs:${partnerId}`);
+    supabaseDataEngine.invalidate(`activeJob:${partnerId}`);
+    supabaseDataEngine.invalidate(`wallet:${partnerId}`);
+    supabaseDataEngine.invalidate(`notifications:${partnerId}`);
     return { success: true, message: `Status updated to ${status}`, booking: job };
   }
 
@@ -985,40 +1121,43 @@ class SupabaseService {
    * Save or fetch Partner KYC & Bank details in public.doorbly_partner_kyc
    */
   public async getPartnerKYC(partnerId: string): Promise<PartnerKYC | null> {
-    if (this.client) {
-      try {
-        const { data, error } = await this.client
-          .from('doorbly_partner_kyc')
-          .select('*')
-          .eq('partner_id', partnerId)
-          .maybeSingle();
+    return supabaseDataEngine.fetchWithEngine(`kyc:${partnerId}`, async () => {
+      if (this.client) {
+        try {
+          const { data, error } = await this.client
+            .from('doorbly_partner_kyc')
+            .select('*')
+            .eq('partner_id', partnerId)
+            .maybeSingle();
 
-        if (!error && data) {
-          return {
-            documentType: (data.document_type as 'aadhaar' | 'pan') || 'aadhaar',
-            documentNumber: data.document_number || '',
-            documentImageUrl: data.document_image_url || undefined,
-            bankAccount: data.bank_account || '',
-            ifsc: data.ifsc || '',
-            accountHolder: data.account_holder || '',
-            certificateUrls: data.certificate_urls || [],
-            submittedAt: data.submitted_at
-          };
+          if (!error && data) {
+            return {
+              documentType: (data.document_type as 'aadhaar' | 'pan') || 'aadhaar',
+              documentNumber: data.document_number || '',
+              documentImageUrl: data.document_image_url || undefined,
+              bankAccount: data.bank_account || '',
+              ifsc: data.ifsc || '',
+              accountHolder: data.account_holder || '',
+              certificateUrls: data.certificate_urls || [],
+              submittedAt: data.submitted_at
+            };
+          }
+        } catch (e) {
+          console.warn('getPartnerKYC notice:', e);
         }
-      } catch (e) {
-        console.warn('getPartnerKYC notice:', e);
       }
-    }
-    try {
-      const localKyc = localStorage.getItem(`doorbly_kyc_${partnerId}`);
-      if (localKyc) return JSON.parse(localKyc) as PartnerKYC;
-    } catch {
-      // ignore
-    }
-    return null;
+      try {
+        const localKyc = localStorage.getItem(`doorbly_kyc_${partnerId}`);
+        if (localKyc) return JSON.parse(localKyc) as PartnerKYC;
+      } catch {
+        // ignore
+      }
+      return null;
+    });
   }
 
   public async upsertPartnerKYC(partnerId: string, kyc: PartnerKYC): Promise<boolean> {
+    supabaseDataEngine.primeCache(`kyc:${partnerId}`, kyc);
     try {
       localStorage.setItem(`doorbly_kyc_${partnerId}`, JSON.stringify(kyc));
     } catch {
@@ -1027,19 +1166,21 @@ class SupabaseService {
 
     if (this.client) {
       try {
-        const { error } = await this.client.from('doorbly_partner_kyc').upsert({
-          id: `kyc_${partnerId}`,
-          partner_id: partnerId,
-          document_type: kyc.documentType,
-          document_number: kyc.documentNumber,
-          document_image_url: kyc.documentImageUrl || null,
-          bank_account: kyc.bankAccount,
-          ifsc: kyc.ifsc,
-          account_holder: kyc.accountHolder,
-          certificate_urls: kyc.certificateUrls || [],
-          submitted_at: kyc.submittedAt || new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        });
+        const { error } = await supabaseDataEngine.executeWrite(async () =>
+          await this.client!.from('doorbly_partner_kyc').upsert({
+            id: `kyc_${partnerId}`,
+            partner_id: partnerId,
+            document_type: kyc.documentType,
+            document_number: kyc.documentNumber,
+            document_image_url: kyc.documentImageUrl || null,
+            bank_account: kyc.bankAccount,
+            ifsc: kyc.ifsc,
+            account_holder: kyc.accountHolder,
+            certificate_urls: kyc.certificateUrls || [],
+            submitted_at: kyc.submittedAt || new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          })
+        );
         return !error;
       } catch (e) {
         console.warn('upsertPartnerKYC notice:', e);
@@ -1061,16 +1202,18 @@ class SupabaseService {
   }): Promise<void> {
     if (!this.client) return;
     try {
-      await this.client.from('doorbly_partner_profession_changes').insert({
-        id: `prf_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-        partner_id: params.partnerId,
-        action_type: params.actionType,
-        category_id: params.categoryId,
-        category_name: params.categoryName,
-        profession_name: params.professionName,
-        fee_paid: params.feePaid,
-        payment_status: 'paid',
-        created_at: new Date().toISOString()
+      await supabaseDataEngine.executeWrite(async () => {
+        await this.client!.from('doorbly_partner_profession_changes').insert({
+          id: `prf_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          partner_id: params.partnerId,
+          action_type: params.actionType,
+          category_id: params.categoryId,
+          category_name: params.categoryName,
+          profession_name: params.professionName,
+          fee_paid: params.feePaid,
+          payment_status: 'paid',
+          created_at: new Date().toISOString()
+        });
       });
     } catch (e) {
       console.warn('logProfessionChange notice:', e);
@@ -1081,35 +1224,47 @@ class SupabaseService {
    * Get Partner Notifications
    */
   public async getNotifications(partnerId: string): Promise<NotificationItem[]> {
-    if (this.client) {
-      try {
-        const { data, error } = await this.client
-          .from('doorbly_partner_notifications')
-          .select('*')
-          .eq('partner_id', partnerId)
-          .order('created_at', { ascending: false });
+    return supabaseDataEngine.fetchWithEngine(`notifications:${partnerId}`, async () => {
+      if (this.client) {
+        try {
+          const { data, error } = await this.client
+            .from('doorbly_partner_notifications')
+            .select('*')
+            .eq('partner_id', partnerId)
+            .order('created_at', { ascending: false });
 
-        if (!error && data) return data as NotificationItem[];
-      } catch (e) {
-        console.warn('Supabase getNotifications error:', e);
+          if (!error && data) return data as NotificationItem[];
+        } catch (e) {
+          console.warn('Supabase getNotifications error:', e);
+        }
       }
-    }
 
-    const store = this.getLocalStore();
-    return store.notifications[partnerId] || [];
+      const store = this.getLocalStore();
+      return store.notifications[partnerId] || [];
+    });
   }
 
   /**
    * Mark notification as read
    */
   public async markNotificationRead(partnerId: string, notificationId: string): Promise<void> {
+    const cachedList = supabaseDataEngine.peekCache<NotificationItem[]>(`notifications:${partnerId}`);
+    if (cachedList) {
+      supabaseDataEngine.primeCache(
+        `notifications:${partnerId}`,
+        cachedList.map(n => (n.id === notificationId ? { ...n, is_read: true } : n))
+      );
+    }
+
     if (this.client) {
       try {
-        await this.client
-          .from('doorbly_partner_notifications')
-          .update({ is_read: true })
-          .eq('id', notificationId)
-          .eq('partner_id', partnerId);
+        await supabaseDataEngine.executeWrite(async () => {
+          await this.client!
+            .from('doorbly_partner_notifications')
+            .update({ is_read: true })
+            .eq('id', notificationId)
+            .eq('partner_id', partnerId);
+        });
       } catch (e) {
         console.warn('markNotificationRead error:', e);
       }
@@ -1136,11 +1291,15 @@ class SupabaseService {
 
     if (this.client) {
       try {
-        const { data, error } = await this.client
-          .from('doorbly_partner_support_tickets')
-          .insert(newTicket)
-          .select()
-          .maybeSingle();
+        const { data, error } = await supabaseDataEngine.executeWrite(
+          async () =>
+            await this.client!
+              .from('doorbly_partner_support_tickets')
+              .insert(newTicket)
+              .select()
+              .maybeSingle(),
+          [`tickets:${ticket.partner_id}`]
+        );
 
         if (!error && data) return data as SupportTicket;
       } catch (e) {
@@ -1152,30 +1311,33 @@ class SupabaseService {
     if (!store.tickets[ticket.partner_id]) store.tickets[ticket.partner_id] = [];
     store.tickets[ticket.partner_id].unshift(newTicket);
     this.saveLocalStore(store);
+    supabaseDataEngine.invalidate(`tickets:${ticket.partner_id}`);
     return newTicket;
   }
 
   public async getSupportTickets(partnerId: string): Promise<SupportTicket[]> {
-    if (this.client) {
-      try {
-        const { data, error } = await this.client
-          .from('doorbly_partner_support_tickets')
-          .select('*')
-          .eq('partner_id', partnerId)
-          .order('created_at', { ascending: false });
+    return supabaseDataEngine.fetchWithEngine(`tickets:${partnerId}`, async () => {
+      if (this.client) {
+        try {
+          const { data, error } = await this.client
+            .from('doorbly_partner_support_tickets')
+            .select('*')
+            .eq('partner_id', partnerId)
+            .order('created_at', { ascending: false });
 
-        if (!error && data) return data as SupportTicket[];
-      } catch (e) {
-        console.warn('getSupportTickets error:', e);
+          if (!error && data) return data as SupportTicket[];
+        } catch (e) {
+          console.warn('getSupportTickets error:', e);
+        }
       }
-    }
 
-    const store = this.getLocalStore();
-    return store.tickets[partnerId] || [];
+      const store = this.getLocalStore();
+      return store.tickets[partnerId] || [];
+    });
   }
 
   /**
-   * Set up real-time listener for incoming job bookings & backend table updates
+   * Set up real-time listener for incoming job bookings & low-latency broadcast events
    */
   public subscribeToRealtimeBookings(
     onNewBooking: (booking: ServiceBooking) => void,
@@ -1186,14 +1348,27 @@ class SupabaseService {
     }
 
     try {
-      const channelName = `partner_realtime_bookings_${Math.random().toString(36).substring(2, 8)}`;
+      const channelName = `doorbly_fast_bookings_stream`;
       const channel = this.client
-        .channel(channelName)
+        .channel(channelName, {
+          config: {
+            broadcast: { self: true }
+          }
+        })
+        .on('broadcast', { event: 'instant_booking_dispatch' }, (payload) => {
+          supabaseDataEngine.recordRealtimeEvent();
+          if (payload.payload) {
+            supabaseDataEngine.invalidate('openJobRequests');
+            onNewBooking(payload.payload as ServiceBooking);
+          }
+        })
         .on(
           'postgres_changes',
           { event: 'INSERT', schema: 'public', table: 'doorbly_service_bookings' },
           (payload) => {
+            supabaseDataEngine.recordRealtimeEvent();
             if (payload.new) {
+              supabaseDataEngine.invalidate('openJobRequests');
               onNewBooking(payload.new as ServiceBooking);
             }
           }
@@ -1202,15 +1377,27 @@ class SupabaseService {
           'postgres_changes',
           { event: 'UPDATE', schema: 'public', table: 'doorbly_service_bookings' },
           (payload) => {
+            supabaseDataEngine.recordRealtimeEvent();
             if (payload.new) {
-              onStatusChange(payload.new as ServiceBooking);
+              const updated = payload.new as ServiceBooking;
+              if (updated.assigned_partner_id) {
+                supabaseDataEngine.invalidate(`jobs:${updated.assigned_partner_id}`);
+                supabaseDataEngine.invalidate(`activeJob:${updated.assigned_partner_id}`);
+              }
+              onStatusChange(updated);
             }
           }
         )
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'doorbly_daily_offers' },
-          () => {
+          (payload) => {
+            supabaseDataEngine.recordRealtimeEvent();
+            if (payload.new) {
+              supabaseDataEngine.primeCache('dailyOffer', payload.new as OfferOfTheDay);
+            } else {
+              supabaseDataEngine.invalidate('dailyOffer');
+            }
             window.dispatchEvent(new CustomEvent('doorbly-realtime-refresh'));
           }
         )
@@ -1230,12 +1417,16 @@ class SupabaseService {
   }
 
   /**
-   * Subscribe to real-time backend updates for a specific partner
-   * (Profile approval/status changes, wallet credits, notifications, memberships, withdrawals)
+   * Subscribe to real-time backend updates for a specific partner with direct payload delta hydration
+   * Eliminates 7-query waterfalls when a single row changes
    */
   public subscribeToPartnerRealtimeSync(
     partnerId: string,
-    onPartnerDataChanged: () => void
+    onPartnerDataChanged: (delta?: {
+      profile?: PartnerProfile;
+      membership?: PartnerMembership;
+      notification?: NotificationItem;
+    }) => void
   ): () => void {
     if (!this.client || !partnerId) {
       return () => {};
@@ -1253,7 +1444,17 @@ class SupabaseService {
             table: 'doorbly_partners',
             filter: `id=eq.${partnerId}`
           },
-          () => onPartnerDataChanged()
+          (payload) => {
+            supabaseDataEngine.recordRealtimeEvent();
+            if (payload.new && Object.keys(payload.new).length > 0) {
+              const updatedProfile = payload.new as PartnerProfile;
+              supabaseDataEngine.primeCache(`profile:${partnerId}`, updatedProfile);
+              onPartnerDataChanged({ profile: updatedProfile });
+            } else {
+              supabaseDataEngine.invalidate(`profile:${partnerId}`);
+              onPartnerDataChanged();
+            }
+          }
         )
         .on(
           'postgres_changes',
@@ -1263,7 +1464,11 @@ class SupabaseService {
             table: 'doorbly_partner_wallets',
             filter: `partner_id=eq.${partnerId}`
           },
-          () => onPartnerDataChanged()
+          () => {
+            supabaseDataEngine.recordRealtimeEvent();
+            supabaseDataEngine.invalidate(`wallet:${partnerId}`);
+            onPartnerDataChanged();
+          }
         )
         .on(
           'postgres_changes',
@@ -1273,17 +1478,37 @@ class SupabaseService {
             table: 'doorbly_partner_wallet_transactions',
             filter: `partner_id=eq.${partnerId}`
           },
-          () => onPartnerDataChanged()
+          () => {
+            supabaseDataEngine.recordRealtimeEvent();
+            supabaseDataEngine.invalidate(`wallet:${partnerId}`);
+            supabaseDataEngine.invalidate(`transactions:${partnerId}`);
+            onPartnerDataChanged();
+          }
         )
         .on(
           'postgres_changes',
           {
-            event: '*',
+            event: 'INSERT',
             schema: 'public',
             table: 'doorbly_partner_notifications',
             filter: `partner_id=eq.${partnerId}`
           },
-          () => onPartnerDataChanged()
+          (payload) => {
+            supabaseDataEngine.recordRealtimeEvent();
+            if (payload.new && Object.keys(payload.new).length > 0) {
+              const newNotif = payload.new as NotificationItem;
+              const existing = supabaseDataEngine.peekCache<NotificationItem[]>(`notifications:${partnerId}`);
+              if (existing) {
+                supabaseDataEngine.primeCache(`notifications:${partnerId}`, [newNotif, ...existing]);
+              } else {
+                supabaseDataEngine.invalidate(`notifications:${partnerId}`);
+              }
+              onPartnerDataChanged({ notification: newNotif });
+            } else {
+              supabaseDataEngine.invalidate(`notifications:${partnerId}`);
+              onPartnerDataChanged();
+            }
+          }
         )
         .on(
           'postgres_changes',
@@ -1293,7 +1518,17 @@ class SupabaseService {
             table: 'doorbly_partner_memberships',
             filter: `partner_id=eq.${partnerId}`
           },
-          () => onPartnerDataChanged()
+          (payload) => {
+            supabaseDataEngine.recordRealtimeEvent();
+            if (payload.new && Object.keys(payload.new).length > 0) {
+              const updatedMem = payload.new as PartnerMembership;
+              supabaseDataEngine.primeCache(`membership:${partnerId}`, updatedMem);
+              onPartnerDataChanged({ membership: updatedMem });
+            } else {
+              supabaseDataEngine.invalidate(`membership:${partnerId}`);
+              onPartnerDataChanged();
+            }
+          }
         )
         .on(
           'postgres_changes',
@@ -1303,7 +1538,12 @@ class SupabaseService {
             table: 'doorbly_partner_withdrawals',
             filter: `partner_id=eq.${partnerId}`
           },
-          () => onPartnerDataChanged()
+          () => {
+            supabaseDataEngine.recordRealtimeEvent();
+            supabaseDataEngine.invalidate(`withdrawals:${partnerId}`);
+            supabaseDataEngine.invalidate(`wallet:${partnerId}`);
+            onPartnerDataChanged();
+          }
         )
         .subscribe();
 
@@ -1319,12 +1559,23 @@ class SupabaseService {
   }
 
   /**
-   * Realtime broadcast trigger for testing/dispatching live jobs from the customer app / backend simulation
+   * Realtime broadcast + DB insert for dispatching live jobs from Admin / Customer app
    */
   public async simulateCustomerBooking(booking: ServiceBooking): Promise<void> {
     if (this.client) {
       try {
-        await this.client.from('doorbly_service_bookings').insert(booking);
+        // Send sub-50ms WebSocket Broadcast alongside Postgres insert
+        if (this.channel) {
+          void this.channel.send({
+            type: 'broadcast',
+            event: 'instant_booking_dispatch',
+            payload: booking
+          });
+        }
+        await supabaseDataEngine.executeWrite(
+          async () => await this.client!.from('doorbly_service_bookings').insert(booking),
+          ['openJobRequests', 'admin:bookings']
+        );
       } catch (e) {
         console.warn('Failed to insert booking:', e);
       }
@@ -1333,28 +1584,36 @@ class SupabaseService {
     const store = this.getLocalStore();
     store.bookings[booking.id] = booking;
     this.saveLocalStore(store);
+    supabaseDataEngine.invalidate('openJobRequests');
+    supabaseDataEngine.invalidate('admin:bookings');
   }
 
   /**
-   * ADMIN METHODS
+   * ADMIN METHODS (Accelerated via Data Engine)
    */
-  public async getAllPartners(): Promise<PartnerProfile[]> {
-    if (this.client) {
-      try {
-        const { data, error } = await this.client
-          .from('doorbly_partners')
-          .select('*')
-          .order('created_at', { ascending: false });
+  public async getAllPartners(forceRefresh = false): Promise<PartnerProfile[]> {
+    return supabaseDataEngine.fetchWithEngine(
+      'admin:partners',
+      async () => {
+        if (this.client) {
+          try {
+            const { data, error } = await this.client
+              .from('doorbly_partners')
+              .select('*')
+              .order('created_at', { ascending: false });
 
-        if (!error && data) return data as PartnerProfile[];
-      } catch (e) {
-        console.warn('getAllPartners error:', e);
-      }
-    }
+            if (!error && data) return data as PartnerProfile[];
+          } catch (e) {
+            console.warn('getAllPartners error:', e);
+          }
+        }
 
-    const store = this.getLocalStore();
-    return Object.values(store.partners).sort(
-      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        const store = this.getLocalStore();
+        return Object.values(store.partners).sort(
+          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        );
+      },
+      { forceRefresh }
     );
   }
 
@@ -1373,10 +1632,14 @@ class SupabaseService {
         if (status !== 'approved') {
           updatePayload.is_online = false;
         }
-        const { error } = await this.client
-          .from('doorbly_partners')
-          .update(updatePayload)
-          .eq('id', partnerId);
+        const { error } = await supabaseDataEngine.executeWrite(
+          async () =>
+            await this.client!
+              .from('doorbly_partners')
+              .update(updatePayload)
+              .eq('id', partnerId),
+          ['admin:partners', `profile:${partnerId}`]
+        );
 
         if (!error) return true;
       } catch (e) {
@@ -1393,28 +1656,36 @@ class SupabaseService {
       if (reason) store.partners[partnerId].status_reason = reason;
       store.partners[partnerId].updated_at = new Date().toISOString();
       this.saveLocalStore(store);
+      supabaseDataEngine.invalidate('admin:partners');
+      supabaseDataEngine.invalidate(`profile:${partnerId}`);
       return true;
     }
     return false;
   }
 
-  public async getAllBookings(): Promise<ServiceBooking[]> {
-    if (this.client) {
-      try {
-        const { data, error } = await this.client
-          .from('doorbly_service_bookings')
-          .select('*')
-          .order('created_at', { ascending: false });
+  public async getAllBookings(forceRefresh = false): Promise<ServiceBooking[]> {
+    return supabaseDataEngine.fetchWithEngine(
+      'admin:bookings',
+      async () => {
+        if (this.client) {
+          try {
+            const { data, error } = await this.client
+              .from('doorbly_service_bookings')
+              .select('*')
+              .order('created_at', { ascending: false });
 
-        if (!error && data) return data as ServiceBooking[];
-      } catch (e) {
-        console.warn('getAllBookings error:', e);
-      }
-    }
+            if (!error && data) return data as ServiceBooking[];
+          } catch (e) {
+            console.warn('getAllBookings error:', e);
+          }
+        }
 
-    const store = this.getLocalStore();
-    return Object.values(store.bookings).sort(
-      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        const store = this.getLocalStore();
+        return Object.values(store.bookings).sort(
+          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        );
+      },
+      { forceRefresh }
     );
   }
 
@@ -1428,10 +1699,14 @@ class SupabaseService {
 
     if (this.client) {
       try {
-        const { error } = await this.client
-          .from('doorbly_service_bookings')
-          .update(updatePayload)
-          .eq('id', bookingId);
+        const { error } = await supabaseDataEngine.executeWrite(
+          async () =>
+            await this.client!
+              .from('doorbly_service_bookings')
+              .update(updatePayload)
+              .eq('id', bookingId),
+          ['admin:bookings', 'openJobRequests', ...(partnerId ? [`jobs:${partnerId}`, `activeJob:${partnerId}`] : [])]
+        );
 
         if (!error) return true;
       } catch (e) {
@@ -1443,28 +1718,35 @@ class SupabaseService {
     if (store.bookings[bookingId]) {
       Object.assign(store.bookings[bookingId], updatePayload);
       this.saveLocalStore(store);
+      supabaseDataEngine.invalidate('admin:bookings');
       return true;
     }
     return false;
   }
 
-  public async getAllWithdrawalsAdmin(): Promise<WithdrawalRequest[]> {
-    if (this.client) {
-      try {
-        const { data, error } = await this.client
-          .from('doorbly_partner_withdrawals')
-          .select('*')
-          .order('requested_at', { ascending: false });
+  public async getAllWithdrawalsAdmin(forceRefresh = false): Promise<WithdrawalRequest[]> {
+    return supabaseDataEngine.fetchWithEngine(
+      'admin:withdrawals',
+      async () => {
+        if (this.client) {
+          try {
+            const { data, error } = await this.client
+              .from('doorbly_partner_withdrawals')
+              .select('*')
+              .order('requested_at', { ascending: false });
 
-        if (!error && data) return data as WithdrawalRequest[];
-      } catch (e) {
-        console.warn('getAllWithdrawalsAdmin error:', e);
-      }
-    }
+            if (!error && data) return data as WithdrawalRequest[];
+          } catch (e) {
+            console.warn('getAllWithdrawalsAdmin error:', e);
+          }
+        }
 
-    const store = this.getLocalStore();
-    const all = Object.values(store.withdrawals).flat();
-    return all.sort((a, b) => new Date(b.requested_at).getTime() - new Date(a.requested_at).getTime());
+        const store = this.getLocalStore();
+        const all = Object.values(store.withdrawals).flat();
+        return all.sort((a, b) => new Date(b.requested_at).getTime() - new Date(a.requested_at).getTime());
+      },
+      { forceRefresh }
+    );
   }
 
   public async updateWithdrawalStatus(
@@ -1473,13 +1755,17 @@ class SupabaseService {
   ): Promise<boolean> {
     if (this.client) {
       try {
-        const { error } = await this.client
-          .from('doorbly_partner_withdrawals')
-          .update({
-            status,
-            processed_at: new Date().toISOString()
-          })
-          .eq('id', withdrawalId);
+        const { error } = await supabaseDataEngine.executeWrite(
+          async () =>
+            await this.client!
+              .from('doorbly_partner_withdrawals')
+              .update({
+                status,
+                processed_at: new Date().toISOString()
+              })
+              .eq('id', withdrawalId),
+          ['admin:withdrawals', 'withdrawals:']
+        );
 
         if (!error) return true;
       } catch (e) {
@@ -1494,28 +1780,36 @@ class SupabaseService {
         target.status = status;
         target.processed_at = new Date().toISOString();
         this.saveLocalStore(store);
+        supabaseDataEngine.invalidate('admin:withdrawals');
+        supabaseDataEngine.invalidate(`withdrawals:${pId}`);
         return true;
       }
     }
     return false;
   }
 
-  public async getAllMembershipsAdmin(): Promise<PartnerMembership[]> {
-    if (this.client) {
-      try {
-        const { data, error } = await this.client
-          .from('doorbly_partner_memberships')
-          .select('*')
-          .order('start_date', { ascending: false });
+  public async getAllMembershipsAdmin(forceRefresh = false): Promise<PartnerMembership[]> {
+    return supabaseDataEngine.fetchWithEngine(
+      'admin:memberships',
+      async () => {
+        if (this.client) {
+          try {
+            const { data, error } = await this.client
+              .from('doorbly_partner_memberships')
+              .select('*')
+              .order('start_date', { ascending: false });
 
-        if (!error && data) return data as PartnerMembership[];
-      } catch (e) {
-        console.warn('getAllMembershipsAdmin error:', e);
-      }
-    }
+            if (!error && data) return data as PartnerMembership[];
+          } catch (e) {
+            console.warn('getAllMembershipsAdmin error:', e);
+          }
+        }
 
-    const store = this.getLocalStore();
-    return Object.values(store.memberships);
+        const store = this.getLocalStore();
+        return Object.values(store.memberships);
+      },
+      { forceRefresh }
+    );
   }
 
   public async updateMembershipStatus(
@@ -1524,13 +1818,17 @@ class SupabaseService {
   ): Promise<boolean> {
     if (this.client) {
       try {
-        const { error } = await this.client
-          .from('doorbly_partner_memberships')
-          .update({
-            status,
-            expiry_date: status === 'active' ? new Date(Date.now() + 30 * 86400000).toISOString() : undefined
-          })
-          .eq('id', membershipId);
+        const { error } = await supabaseDataEngine.executeWrite(
+          async () =>
+            await this.client!
+              .from('doorbly_partner_memberships')
+              .update({
+                status,
+                expiry_date: status === 'active' ? new Date(Date.now() + 30 * 86400000).toISOString() : undefined
+              })
+              .eq('id', membershipId),
+          ['admin:memberships', 'membership:']
+        );
 
         if (!error) return true;
       } catch (e) {
@@ -1546,6 +1844,8 @@ class SupabaseService {
           store.memberships[pId].expiry_date = new Date(Date.now() + 30 * 86400000).toISOString();
         }
         this.saveLocalStore(store);
+        supabaseDataEngine.invalidate('admin:memberships');
+        supabaseDataEngine.invalidate(`membership:${pId}`);
         return true;
       }
     }
@@ -1553,36 +1853,38 @@ class SupabaseService {
   }
 
   /**
-   * Fetch Offer of the Day (Live from Supabase with local fallback)
+   * Fetch Offer of the Day (Live from Supabase with L1 SWR cache & local fallback)
    */
   public async getOfferOfTheDay(): Promise<OfferOfTheDay> {
-    if (this.client) {
-      try {
-        const { data, error } = await this.client
-          .from('doorbly_daily_offers')
-          .select('*')
-          .eq('id', 'offer_of_the_day')
-          .maybeSingle();
+    return supabaseDataEngine.fetchWithEngine('dailyOffer', async () => {
+      if (this.client) {
+        try {
+          const { data, error } = await this.client
+            .from('doorbly_daily_offers')
+            .select('*')
+            .eq('id', 'offer_of_the_day')
+            .maybeSingle();
 
-        if (!error && data) {
-          localStorage.setItem(STORAGE_KEY_DAILY_OFFER, JSON.stringify(data));
-          return data as OfferOfTheDay;
+          if (!error && data) {
+            localStorage.setItem(STORAGE_KEY_DAILY_OFFER, JSON.stringify(data));
+            return data as OfferOfTheDay;
+          }
+        } catch (e) {
+          console.warn('getOfferOfTheDay notice:', e);
         }
-      } catch (e) {
-        console.warn('getOfferOfTheDay notice:', e);
       }
-    }
 
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY_DAILY_OFFER);
-      if (saved) {
-        return JSON.parse(saved) as OfferOfTheDay;
+      try {
+        const saved = localStorage.getItem(STORAGE_KEY_DAILY_OFFER);
+        if (saved) {
+          return JSON.parse(saved) as OfferOfTheDay;
+        }
+      } catch {
+        // ignore
       }
-    } catch {
-      // ignore
-    }
 
-    return DEFAULT_OFFER_OF_THE_DAY;
+      return DEFAULT_OFFER_OF_THE_DAY;
+    });
   }
 
   /**
@@ -1595,19 +1897,24 @@ class SupabaseService {
       updated_at: new Date().toISOString()
     };
 
+    supabaseDataEngine.primeCache('dailyOffer', updated);
     localStorage.setItem(STORAGE_KEY_DAILY_OFFER, JSON.stringify(updated));
 
     if (this.client) {
       try {
-        const { data, error } = await this.client
-          .from('doorbly_daily_offers')
-          .upsert(updated)
-          .select()
-          .maybeSingle();
+        const { data, error } = await supabaseDataEngine.executeWrite(async () =>
+          await this.client!
+            .from('doorbly_daily_offers')
+            .upsert(updated)
+            .select()
+            .maybeSingle()
+        );
 
         if (!error && data) {
-          localStorage.setItem(STORAGE_KEY_DAILY_OFFER, JSON.stringify(data));
-          return data as OfferOfTheDay;
+          const saved = data as OfferOfTheDay;
+          supabaseDataEngine.primeCache('dailyOffer', saved);
+          localStorage.setItem(STORAGE_KEY_DAILY_OFFER, JSON.stringify(saved));
+          return saved;
         }
       } catch (e) {
         console.warn('updateOfferOfTheDay Supabase notice:', e);

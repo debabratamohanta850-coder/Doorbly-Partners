@@ -10,6 +10,7 @@ import {
   BookingStatus
 } from '../types';
 import { supabaseService } from '../services/supabaseClient';
+import { supabaseDataEngine, DataEngineStats, SyncSpeedMode } from '../services/supabaseDataEngine';
 import { partnerAuthService } from '../services/partnerAuth';
 import { locationService, GeoLocationCoords } from '../services/locationService';
 import { soundService } from '../services/soundAndVibrate';
@@ -50,8 +51,10 @@ interface PartnerContextType {
   viewMode: 'partner' | 'admin';
   batteryState: UseBatteryStatusResult;
   lastJobPollTime: string | null;
+  dataEngineStats: DataEngineStats;
   
   // Actions
+  setDataEngineMode: (mode: SyncSpeedMode) => void;
   setViewMode: (mode: 'partner' | 'admin') => void;
   lockAdmin: () => void;
   setActiveTab: (tab: NavigationTab) => void;
@@ -68,7 +71,6 @@ interface PartnerContextType {
   requestWithdrawal: (amount: number, bank: string, ifsc: string, holder: string) => Promise<{ success: boolean; message: string }>;
   createSupportTicket: (ticket: Omit<SupportTicket, 'id' | 'created_at' | 'partner_id'>) => Promise<boolean>;
   markNotificationRead: (id: string) => Promise<void>;
-  simulateIncomingJobForTesting: () => void;
   refreshSession: () => Promise<void>;
   logout: () => Promise<void>;
 }
@@ -124,7 +126,18 @@ export const PartnerProvider: React.FC<{ children: ReactNode }> = ({ children })
     partnerAuthService.isDeviceAdminUnlocked() ? 'admin' : 'partner'
   );
   const [lastJobPollTime, setLastJobPollTime] = useState<string | null>(null);
+  const [dataEngineStats, setDataEngineStats] = useState<DataEngineStats>(() => supabaseDataEngine.getStats());
   const seenBookingIdsRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    return supabaseDataEngine.subscribeStats((stats) => {
+      setDataEngineStats(stats);
+    });
+  }, []);
+
+  const setDataEngineMode = useCallback((mode: SyncSpeedMode) => {
+    supabaseDataEngine.setMode(mode);
+  }, []);
 
   // Use the Battery Status API hook to monitor device charge levels and visibility
   const batteryState = useBatteryStatus();
@@ -276,19 +289,37 @@ export const PartnerProvider: React.FC<{ children: ReactNode }> = ({ children })
     }
   }, [partner?.id]);
 
-  // Subscribe to real-time backend updates for this partner (Admin approval, wallet, notifications, membership)
+  // Subscribe to real-time backend updates for this partner via Turbo Engine Delta Hydration
   useEffect(() => {
     if (!partner?.id) return;
     const unsubscribePartnerSync = supabaseService.subscribeToPartnerRealtimeSync(
       partner.id,
-      () => {
+      (delta) => {
+        if (delta) {
+          if (delta.profile) {
+            setPartner(delta.profile);
+            if (delta.profile.status !== 'approved' && isOnline) {
+              locationService.stopTracking();
+              void supabaseService.updatePartnerAvailability(partner.id, false);
+              setIsOnline(false);
+            }
+          }
+          if (delta.membership) {
+            setMembership(delta.membership);
+          }
+          if (delta.notification) {
+            soundService.playJobAlertChime();
+            setNotifications((prev) => [delta.notification!, ...prev.filter((n) => n.id !== delta.notification!.id)]);
+          }
+          return;
+        }
         refreshAll();
       }
     );
     return () => {
       unsubscribePartnerSync();
     };
-  }, [partner?.id, refreshAll]);
+  }, [partner?.id, isOnline, refreshAll]);
 
   // Listen for foreground Firebase Cloud Messaging (FCM) push notifications
   useEffect(() => {
@@ -504,14 +535,12 @@ export const PartnerProvider: React.FC<{ children: ReactNode }> = ({ children })
     };
   }, [isOnline, partner, activeJob, evaluateBookingForAlert]);
 
-  // Adaptive Job Request Polling Loop
-  // Normal Mode: polls every 5s (5000ms)
-  // Battery-Saving Mode (<20% battery or App in Background): reduces polling to every 30s (30000ms)
+  // Adaptive Job Request Polling Loop accelerated by Supabase Turbo Engine
   useEffect(() => {
     if (!isOnline || !partner || activeJob) return;
 
     let isCancelled = false;
-    const pollIntervalMs = batteryState.jobPollingIntervalMs;
+    const pollIntervalMs = supabaseDataEngine.getEffectiveJobPollIntervalMs(batteryState.jobPollingIntervalMs);
 
     const runJobPoll = async () => {
       if (isCancelled || incomingRequest) return;
@@ -529,7 +558,7 @@ export const PartnerProvider: React.FC<{ children: ReactNode }> = ({ children })
       }
     };
 
-    // Run initial poll then schedule at the adaptive interval (5s normal vs 30s battery saver)
+    // Run initial poll then schedule at the Turbo / adaptive interval
     runJobPoll();
     const intervalId = setInterval(runJobPoll, pollIntervalMs);
 
@@ -537,7 +566,7 @@ export const PartnerProvider: React.FC<{ children: ReactNode }> = ({ children })
       isCancelled = true;
       clearInterval(intervalId);
     };
-  }, [isOnline, partner, activeJob, incomingRequest, batteryState.jobPollingIntervalMs, evaluateBookingForAlert]);
+  }, [isOnline, partner, activeJob, incomingRequest, batteryState.jobPollingIntervalMs, dataEngineStats.mode, evaluateBookingForAlert]);
 
   // Accept incoming job
   const acceptIncomingJob = async (): Promise<boolean> => {
@@ -643,52 +672,6 @@ export const PartnerProvider: React.FC<{ children: ReactNode }> = ({ children })
     setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
   };
 
-  // Helper to test incoming job matching when online
-  const simulateIncomingJobForTesting = () => {
-    if (!isOnline) {
-      alert("Please turn ONLINE first to receive nearby job requests.");
-      return;
-    }
-    if (activeJob) {
-      alert("You already have an active job in progress.");
-      return;
-    }
-
-    const testId = `job_${Date.now()}`;
-    const testBooking: ServiceBooking = {
-      id: testId,
-      customer_name: 'Aakash Sharma',
-      customer_phone: '+91 98112 34567',
-      service_category: partner?.primary_category || 'AC Services',
-      service_name: 'Split AC Foam Jet Deep Service',
-      service_description: 'AC not cooling properly, bad odor and dust accumulated in indoor blower',
-      customer_location_address: 'Flat 402, Royal Palms, Link Road',
-      latitude: (location?.latitude || 28.6139) + (Math.random() - 0.5) * 0.03,
-      longitude: (location?.longitude || 77.2090) + (Math.random() - 0.5) * 0.03,
-      distance_km: 2.3,
-      booking_date: new Date().toISOString().split('T')[0],
-      booking_time: 'Immediate',
-      estimated_duration: '1 Hour',
-      customer_price: 599,
-      partner_earning: 480,
-      status: 'SEARCHING_PARTNER',
-      otp_code: '4829',
-      created_at: new Date().toISOString()
-    };
-
-    supabaseService.simulateCustomerBooking(testBooking);
-
-    const alertItem: JobRequestAlert = {
-      booking: testBooking,
-      request_id: `req_${Date.now()}`,
-      expires_in_seconds: 25,
-      expires_at: Date.now() + 25000
-    };
-
-    setIncomingRequest(alertItem);
-    soundService.startIncomingLoop();
-  };
-
   // Logout
   const logout = async () => {
     if (isOnline) {
@@ -734,6 +717,8 @@ export const PartnerProvider: React.FC<{ children: ReactNode }> = ({ children })
         viewMode,
         batteryState,
         lastJobPollTime,
+        dataEngineStats,
+        setDataEngineMode,
         setViewMode,
         lockAdmin,
         setActiveTab,
@@ -750,7 +735,6 @@ export const PartnerProvider: React.FC<{ children: ReactNode }> = ({ children })
         requestWithdrawal,
         createSupportTicket,
         markNotificationRead,
-        simulateIncomingJobForTesting,
         refreshSession: initPartnerSession,
         logout
       }}
