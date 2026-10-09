@@ -21,8 +21,8 @@ messaging.onBackgroundMessage((payload) => {
     body:
       (payload && payload.notification && payload.notification.body) ||
       'Open Doorbly Partner to view live job request details.',
-    icon: '/icon.svg',
-    badge: '/icon.svg',
+    icon: 'https://fktznwvrlsgmbrisyyac.supabase.co/storage/v1/object/sign/logo/logo%20(2).png?token=eyJraWQiOiJiMjQwZDFlOC0wZDVkLTQ1Y2EtYTdmYy1kNDllYWUyODljMGUiLCJhbGciOiJIUzUxMiJ9.eyJ1cmwiOiJsb2dvL2xvZ28gKDIpLnBuZyIsInNjb3BlIjoiZG93bmxvYWQiLCJpYXQiOjE3OTE1MTY5NzYsImV4cCI6MTgyMzA1Mjk3Nn0.spYpEM43vQKHvC2SnHk5V1TIobClSA7GDrhr5OxJdbw1TdrUVDAcymrwdRbHSlP_L34exW3A1zs2EF1BGYiyIQ',
+    badge: 'https://fktznwvrlsgmbrisyyac.supabase.co/storage/v1/object/sign/logo/logo%20(2).png?token=eyJraWQiOiJiMjQwZDFlOC0wZDVkLTQ1Y2EtYTdmYy1kNDllYWUyODljMGUiLCJhbGciOiJIUzUxMiJ9.eyJ1cmwiOiJsb2dvL2xvZ28gKDIpLnBuZyIsInNjb3BlIjoiZG93bmxvYWQiLCJpYXQiOjE3OTE1MTY5NzYsImV4cCI6MTgyMzA1Mjk3Nn0.spYpEM43vQKHvC2SnHk5V1TIobClSA7GDrhr5OxJdbw1TdrUVDAcymrwdRbHSlP_L34exW3A1zs2EF1BGYiyIQ',
     vibrate: [200, 100, 200, 100, 300],
     data: (payload && payload.data) || {}
   };

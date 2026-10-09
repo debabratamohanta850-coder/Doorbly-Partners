@@ -29,7 +29,18 @@ import {
   MessagePayload
 } from 'firebase/messaging';
 
-export const firebaseConfig = {
+export interface DoorblyFirebaseConfig {
+  apiKey: string;
+  authDomain: string;
+  projectId: string;
+  storageBucket: string;
+  messagingSenderId: string;
+  appId: string;
+}
+
+const STORAGE_KEY_FIREBASE_CONFIG = 'doorbly_firebase_config_v1';
+
+export const DEFAULT_FIREBASE_CONFIG: DoorblyFirebaseConfig = {
   apiKey: 'AIzaSyDgF1AvQ5eQtuAfnCtqezLPLNHLoPJ9i1I',
   authDomain: 'doorbly-b0bba.firebaseapp.com',
   projectId: 'doorbly-b0bba',
@@ -37,6 +48,31 @@ export const firebaseConfig = {
   messagingSenderId: '977376808906',
   appId: '1:977376808906:web:caf01942d3773fb85d4933'
 };
+
+export function getSavedFirebaseConfig(): DoorblyFirebaseConfig {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_FIREBASE_CONFIG);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.apiKey && parsed.projectId && parsed.appId) {
+        return { ...DEFAULT_FIREBASE_CONFIG, ...parsed };
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return DEFAULT_FIREBASE_CONFIG;
+}
+
+export function saveFirebaseConfig(config: DoorblyFirebaseConfig): void {
+  try {
+    localStorage.setItem(STORAGE_KEY_FIREBASE_CONFIG, JSON.stringify(config));
+  } catch {
+    // ignore
+  }
+}
+
+export const firebaseConfig: DoorblyFirebaseConfig = getSavedFirebaseConfig();
 
 export const FCM_VAPID_KEY =
   'BFP-5qoHGevfo94FE9-icWu1FkXPSlyZy0By_yvNNcp8YKdNrpUnLGmJJ_fWftzk_hZHBeLlsi6dI8HryvuvDL0';

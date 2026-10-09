@@ -3,7 +3,15 @@ import { usePartner } from '../../context/PartnerContext';
 import { supabaseService } from '../../services/supabaseClient';
 import { Database, Check, AlertCircle, Copy, Server, Radio, ShieldCheck, Loader2, BatteryLow, BatteryCharging, BellRing, RefreshCw } from 'lucide-react';
 import { BatterySaverPreference } from '../../services/batteryService';
-import { FCM_VAPID_KEY, getSavedFcmToken, requestFcmPushToken } from '../../services/firebase';
+import {
+  FCM_VAPID_KEY,
+  getSavedFcmToken,
+  requestFcmPushToken,
+  getSavedFirebaseConfig,
+  saveFirebaseConfig,
+  DEFAULT_FIREBASE_CONFIG,
+  testFirestoreConnection
+} from '../../services/firebase';
 import { SUPABASE_COMPLETE_SQL_MIGRATION } from '../../constants/supabaseSqlMigration';
 
 export const SettingsView: React.FC = () => {
@@ -26,10 +34,29 @@ export const SettingsView: React.FC = () => {
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [copiedSql, setCopiedSql] = useState(false);
 
+  // Firebase Configuration State
+  const [fbConfig, setFbConfig] = useState(() => getSavedFirebaseConfig());
+  const [fbStatus, setFbStatus] = useState<{ success: boolean; message: string } | null>(null);
+  const [isTestingFb, setIsTestingFb] = useState(false);
+
   const [fcmToken, setFcmToken] = useState<string | null>(() => getSavedFcmToken());
   const [isRegisteringFcm, setIsRegisteringFcm] = useState(false);
   const [fcmStatus, setFcmStatus] = useState<{ success: boolean; message: string } | null>(null);
   const [copiedFcm, setCopiedFcm] = useState(false);
+
+  const handleSaveFirebaseConfig = async (e: React.FormEvent) => {
+    e.preventDefault();
+    saveFirebaseConfig(fbConfig);
+    setIsTestingFb(true);
+    const ok = await testFirestoreConnection();
+    setIsTestingFb(false);
+    setFbStatus({
+      success: true,
+      message: ok
+        ? `Firebase project "${fbConfig.projectId}" keys saved & active.`
+        : `Firebase project "${fbConfig.projectId}" keys saved. Click "Update & Restart" to reload SDK.`
+    });
+  };
 
   const handleEnableFcmPush = async () => {
     setIsRegisteringFcm(true);
@@ -99,6 +126,7 @@ export const SettingsView: React.FC = () => {
           type="button"
           onClick={async () => {
             supabaseService.setConfig(supabaseUrl.trim(), supabaseKey.trim());
+            saveFirebaseConfig(fbConfig);
             await Promise.all([refreshAll(), refreshSession()]);
             window.location.reload();
           }}
@@ -108,6 +136,120 @@ export const SettingsView: React.FC = () => {
           <span>Update &amp; Restart</span>
         </button>
       </div>
+
+      {/* Firebase Integration & Keys Card */}
+      <form
+        onSubmit={handleSaveFirebaseConfig}
+        className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs space-y-4"
+      >
+        <div className="flex items-center justify-between">
+          <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
+            <Server className="w-4 h-4 text-[#0F766E]" />
+            <span>Firebase Integration &amp; Keys ({fbConfig.projectId})</span>
+          </h3>
+
+          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-emerald-100 text-emerald-800 border border-emerald-200">
+            Active SDK
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+          <div className="sm:col-span-2">
+            <label className="font-semibold text-slate-700 block mb-1">API Key</label>
+            <input
+              type="text"
+              value={fbConfig.apiKey}
+              onChange={(e) => setFbConfig({ ...fbConfig, apiKey: e.target.value.trim() })}
+              className="w-full p-2.5 border border-slate-300 rounded-xl focus:border-[#0F766E] focus:outline-hidden font-mono text-xs"
+            />
+          </div>
+
+          <div>
+            <label className="font-semibold text-slate-700 block mb-1">Project ID</label>
+            <input
+              type="text"
+              value={fbConfig.projectId}
+              onChange={(e) => setFbConfig({ ...fbConfig, projectId: e.target.value.trim() })}
+              className="w-full p-2.5 border border-slate-300 rounded-xl focus:border-[#0F766E] focus:outline-hidden font-mono text-xs"
+            />
+          </div>
+
+          <div>
+            <label className="font-semibold text-slate-700 block mb-1">Auth Domain</label>
+            <input
+              type="text"
+              value={fbConfig.authDomain}
+              onChange={(e) => setFbConfig({ ...fbConfig, authDomain: e.target.value.trim() })}
+              className="w-full p-2.5 border border-slate-300 rounded-xl focus:border-[#0F766E] focus:outline-hidden font-mono text-xs"
+            />
+          </div>
+
+          <div>
+            <label className="font-semibold text-slate-700 block mb-1">Storage Bucket</label>
+            <input
+              type="text"
+              value={fbConfig.storageBucket}
+              onChange={(e) => setFbConfig({ ...fbConfig, storageBucket: e.target.value.trim() })}
+              className="w-full p-2.5 border border-slate-300 rounded-xl focus:border-[#0F766E] focus:outline-hidden font-mono text-xs"
+            />
+          </div>
+
+          <div>
+            <label className="font-semibold text-slate-700 block mb-1">Messaging Sender ID</label>
+            <input
+              type="text"
+              value={fbConfig.messagingSenderId}
+              onChange={(e) =>
+                setFbConfig({ ...fbConfig, messagingSenderId: e.target.value.trim() })
+              }
+              className="w-full p-2.5 border border-slate-300 rounded-xl focus:border-[#0F766E] focus:outline-hidden font-mono text-xs"
+            />
+          </div>
+
+          <div className="sm:col-span-2">
+            <label className="font-semibold text-slate-700 block mb-1">App ID</label>
+            <input
+              type="text"
+              value={fbConfig.appId}
+              onChange={(e) => setFbConfig({ ...fbConfig, appId: e.target.value.trim() })}
+              className="w-full p-2.5 border border-slate-300 rounded-xl focus:border-[#0F766E] focus:outline-hidden font-mono text-xs"
+            />
+          </div>
+        </div>
+
+        {fbStatus && (
+          <div className="p-3 rounded-xl text-xs font-medium flex items-start gap-2 bg-emerald-50 text-emerald-800 border border-emerald-200">
+            <Check className="w-4 h-4 shrink-0 text-emerald-600 mt-0.5" />
+            <span>{fbStatus.message}</span>
+          </div>
+        )}
+
+        <div className="flex items-center gap-2 pt-1">
+          <button
+            type="submit"
+            disabled={isTestingFb}
+            className="flex-1 py-2.5 bg-[#0F766E] hover:bg-teal-700 text-white font-bold text-xs rounded-xl shadow-xs flex items-center justify-center gap-1.5 cursor-pointer"
+          >
+            {isTestingFb ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+            <span>Save Firebase Keys</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setFbConfig(DEFAULT_FIREBASE_CONFIG);
+              saveFirebaseConfig(DEFAULT_FIREBASE_CONFIG);
+              setFbStatus({
+                success: true,
+                message: 'Restored default doorbly-b0bba Firebase keys.'
+              });
+            }}
+            className="py-2.5 px-3.5 border border-slate-300 text-slate-700 font-bold text-xs rounded-xl hover:bg-slate-50 cursor-pointer"
+          >
+            Reset Default
+          </button>
+        </div>
+      </form>
 
       {/* Battery-Saving Mode & Adaptive Polling Card */}
       <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs space-y-4">
