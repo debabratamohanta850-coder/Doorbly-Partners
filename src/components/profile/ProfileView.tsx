@@ -1,9 +1,24 @@
 import React, { useState } from 'react';
 import { usePartner } from '../../context/PartnerContext';
-import { User, Phone, Mail, MapPin, Award, ShieldCheck, Save, Check, LogOut, Loader2 } from 'lucide-react';
+import {
+  User,
+  Phone,
+  Mail,
+  MapPin,
+  Award,
+  ShieldCheck,
+  Save,
+  Check,
+  LogOut,
+  Loader2,
+  Lock,
+  KeyRound,
+  Database,
+  AlertCircle
+} from 'lucide-react';
 
 export const ProfileView: React.FC = () => {
-  const { partner, membership, updatePartner, setActiveTab, logout } = usePartner();
+  const { partner, membership, updatePartner, updateScreenLockCode, setActiveTab, logout } = usePartner();
 
   const [name, setName] = useState(partner?.name || '');
   const [mobile, setMobile] = useState(partner?.mobile || '');
@@ -18,6 +33,12 @@ export const ProfileView: React.FC = () => {
   const [showSavedToast, setShowSavedToast] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+
+  // Screen Lock 4-Digit Code state
+  const [screenPin, setScreenPin] = useState(partner?.screen_lock_code || '');
+  const [isUpdatingPin, setIsUpdatingPin] = useState(false);
+  const [pinSuccessMsg, setPinSuccessMsg] = useState<string | null>(null);
+  const [pinErrorMsg, setPinErrorMsg] = useState<string | null>(null);
 
   const handleLogout = async () => {
     setIsLoggingOut(true);
@@ -224,6 +245,100 @@ export const ProfileView: React.FC = () => {
           </button>
         </div>
       </form>
+
+      {/* Screen Lock 4-Digit Code Security Card (Stored in Supabase) */}
+      <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
+            <Lock className="w-4 h-4 text-[#0F766E]" />
+            <span>Screen Lock 4-Digit Code</span>
+          </h3>
+
+          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-teal-50 text-teal-800 border border-teal-200">
+            {partner?.is_screen_code_verified ? 'Genuine Verified' : 'Supabase Security'}
+          </span>
+        </div>
+
+        <p className="text-xs text-slate-500 leading-relaxed">
+          This 4-digit code is stored in Supabase. You are required to verify this code every time you switch to Online status to confirm your genuine identity.
+        </p>
+
+        {pinSuccessMsg && (
+          <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold rounded-xl flex items-center gap-2">
+            <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>{pinSuccessMsg}</span>
+          </div>
+        )}
+
+        {pinErrorMsg && (
+          <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+            <span>{pinErrorMsg}</span>
+          </div>
+        )}
+
+        <form
+          onSubmit={async (e) => {
+            e.preventDefault();
+            if (!/^\d{4}$/.test(screenPin.trim())) {
+              setPinErrorMsg('Screen code must be exactly 4 numeric digits (e.g. 1234).');
+              return;
+            }
+            setIsUpdatingPin(true);
+            setPinErrorMsg(null);
+            setPinSuccessMsg(null);
+            try {
+              const res = await updateScreenLockCode(screenPin.trim());
+              if (res.success) {
+                setPinSuccessMsg('4-digit screen lock code updated & verified in Supabase!');
+                setTimeout(() => setPinSuccessMsg(null), 3500);
+              } else {
+                setPinErrorMsg(res.message);
+              }
+            } catch (err: unknown) {
+              setPinErrorMsg(err instanceof Error ? err.message : 'Failed to update code in Supabase.');
+            } finally {
+              setIsUpdatingPin(false);
+            }
+          }}
+          className="space-y-3"
+        >
+          <div>
+            <label className="font-semibold text-slate-700 block mb-1 text-xs">
+              4-Digit Screen Code
+            </label>
+            <div className="relative">
+              <KeyRound className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
+              <input
+                type="password"
+                maxLength={4}
+                inputMode="numeric"
+                value={screenPin}
+                onChange={(e) => setScreenPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                placeholder="•••• (e.g. 1234)"
+                className="w-full pl-9 pr-3 py-2.5 border border-slate-300 rounded-xl focus:border-[#0F766E] focus:outline-hidden font-mono tracking-widest text-base font-bold text-slate-900"
+                required
+              />
+            </div>
+            <p className="text-[10px] text-slate-400 mt-1">
+              Registered for mobile number: <strong>{partner?.mobile || 'Primary Mobile'}</strong>
+            </p>
+          </div>
+
+          <button
+            type="submit"
+            disabled={isUpdatingPin || screenPin.length !== 4}
+            className="w-full py-2.5 bg-teal-50 hover:bg-teal-100 text-[#0F766E] border border-teal-200 font-bold text-xs rounded-xl shadow-2xs flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+          >
+            {isUpdatingPin ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-[#0F766E]" />
+            ) : (
+              <ShieldCheck className="w-3.5 h-3.5" />
+            )}
+            <span>Save &amp; Verify Code in Supabase</span>
+          </button>
+        </form>
+      </div>
 
       {/* Account Session Logout */}
       <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs space-y-3">

@@ -50,3 +50,49 @@
   animation: marquee-scroll 11s linear infinite;
 }
 
+@keyframes continuous-scroll {
+  0% {
+    transform: translateX(0%);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+.animate-continuous-scroll {
+  display: flex;
+  width: max-content;
+  animation: continuous-scroll 18s linear infinite;
+}
+
+.animate-continuous-scroll:hover {
+  animation-play-state: paused;
+}
+
+@keyframes flash-out-pulse {
+  0% {
+    opacity: 0;
+    transform: translateY(4px) scale(0.97);
+    filter: brightness(1.4);
+  }
+  18% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: brightness(1.1);
+  }
+  85% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: brightness(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+    filter: brightness(0.85);
+  }
+}
+
+.animate-flash-feature {
+  animation: flash-out-pulse 3.2s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+}
+

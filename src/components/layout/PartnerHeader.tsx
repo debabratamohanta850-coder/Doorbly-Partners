@@ -24,7 +24,7 @@ export const PartnerHeader: React.FC<PartnerHeaderProps> = ({ onOpenMenu }) => {
     setIsUpdating(true);
     try {
       const res = await toggleOnline();
-      if (!res.success) {
+      if (!res.success && !res.message.toLowerCase().includes('verification required')) {
         setIdAlertMessage(res.message);
       }
     } finally {

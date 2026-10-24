@@ -8,6 +8,7 @@ import { DoorblyLogoIcon } from './constants/branding';
 import { testFirestoreConnection } from './services/firebase';
 import { locationService } from './services/locationService';
 import { Loader2, Maximize2, Phone, MessageSquare } from 'lucide-react';
+import { GoOnlineVerificationModal } from './components/layout/GoOnlineVerificationModal';
 
 // Lazy-load secondary views and modals to keep the initial bundle ultra-lightweight
 const AuthScreen = lazy(() =>
@@ -230,6 +231,9 @@ const MainAppContent: React.FC = () => {
         {isMenuOpen && <DrawerMenu isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} />}
         {incomingRequest && <IncomingJobModal />}
       </Suspense>
+
+      {/* Screen Lock 4-Digit Code Security Verification Modal */}
+      <GoOnlineVerificationModal />
     </div>
   );
 };

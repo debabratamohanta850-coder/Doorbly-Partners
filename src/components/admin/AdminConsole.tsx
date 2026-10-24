@@ -42,6 +42,9 @@ const ActivePartnersView = lazy(() =>
 const ActiveJobsSheetView = lazy(() =>
   import('./ActiveJobsSheetView').then((m) => ({ default: m.ActiveJobsSheetView }))
 );
+const SubscriptionAdminView = lazy(() =>
+  import('./SubscriptionAdminView').then((m) => ({ default: m.SubscriptionAdminView }))
+);
 
 interface AdminConsoleProps {
   onSwitchToPartnerView: () => void;
@@ -199,7 +202,7 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
     { id: 'partners', label: `All Partners (${partners.length})`, icon: Users },
     { id: 'bookings', label: `Bookings (${bookings.length})`, icon: Briefcase },
     { id: 'withdrawals', label: `Payouts (${pendingWithdrawalCount})`, icon: Wallet },
-    { id: 'memberships', label: 'Memberships', icon: ShieldCheck },
+    { id: 'memberships', label: 'Subscription & Tax', icon: ShieldCheck },
     { id: 'dispatch', label: 'Dispatch Job', icon: Send },
     { id: 'settings', label: 'Backend & App Settings', icon: Settings }
   ] as const;
@@ -897,71 +900,11 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
               </div>
             )}
 
-            {/* MEMBERSHIPS TAB */}
+            {/* SUBSCRIPTION & TAX MANAGEMENT TAB */}
             {activeTab === 'memberships' && (
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <h3 className="font-bold text-sm text-white">
-                    Partner ₹370 Memberships ({memberships.length})
-                  </h3>
-                  <button onClick={loadData} className="text-xs text-slate-400 hover:text-white">
-                    <RefreshCw className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-
-                {memberships.length === 0 ? (
-                  <div className="p-8 text-center bg-slate-800/60 rounded-2xl text-xs text-slate-400">
-                    No membership records found.
-                  </div>
-                ) : (
-                  memberships.map(m => (
-                    <div
-                      key={m.id}
-                      className="p-4 bg-slate-800/80 border border-slate-700 rounded-2xl space-y-2 text-xs"
-                    >
-                      <div className="flex items-start justify-between">
-                        <div>
-                          <div className="font-bold text-sm text-white">{m.plan_name}</div>
-                          <div className="text-slate-400 text-[11px] mt-0.5">
-                            Partner ID: <span className="font-mono">{m.partner_id.substring(0, 10)}</span>
-                          </div>
-                          <div className="text-slate-400 text-[11px] mt-0.5">
-                            Expiry: {m.expiry_date ? new Date(m.expiry_date).toLocaleDateString() : 'N/A'}
-                          </div>
-                        </div>
-
-                        <span
-                          className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded ${
-                            m.status === 'active'
-                              ? 'bg-emerald-950 text-emerald-400'
-                              : 'bg-rose-950 text-rose-400'
-                          }`}
-                        >
-                          {m.status}
-                        </span>
-                      </div>
-
-                      <div className="pt-2 border-t border-slate-700 flex items-center justify-end gap-2">
-                        {m.status !== 'active' ? (
-                          <button
-                            onClick={() => handleUpdateMembership(m.id, 'active')}
-                            className="py-1 px-3 bg-emerald-700 hover:bg-emerald-600 text-white rounded-lg text-xs font-bold"
-                          >
-                            Activate Plan (30 Days)
-                          </button>
-                        ) : (
-                          <button
-                            onClick={() => handleUpdateMembership(m.id, 'expired')}
-                            className="py-1 px-3 bg-slate-700 hover:bg-slate-600 text-rose-300 rounded-lg text-xs font-bold"
-                          >
-                            Expire Plan
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
+              <Suspense fallback={<div className="p-8 text-center text-slate-400">Loading Subscriptions &amp; Tax...</div>}>
+                <SubscriptionAdminView allPartners={partners} />
+              </Suspense>
             )}
 
             {/* DISPATCH CUSTOM JOB TAB */}

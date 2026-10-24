@@ -11,9 +11,12 @@ import {
   BookingStatus,
   PartnerStatus,
   OfferOfTheDay,
-  PartnerKYC
+  PartnerKYC,
+  ScreenCredentialRecord,
+  ScreenCodeVerificationResult
 } from '../types';
 import { supabaseDataEngine } from './supabaseDataEngine';
+import { subscriptionService } from './subscriptionService';
 
 export interface SupabaseConfig {
   url: string;
@@ -39,18 +42,22 @@ const DEFAULT_SUPABASE_URL = 'https://sksqfbugbeoskypjtjxw.supabase.co';
 const DEFAULT_SUPABASE_ANON_KEY =
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNrc3FmYnVnYmVvc2t5cGp0anh3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTEwODg2NzksImV4cCI6MjEwNjY2NDY3OX0.08Efj6gaF6BSOdHtZraCEAcqKubS506xS-7PG0lzpVc';
 
+interface LocalStorageStore {
+  partners: Record<string, PartnerProfile>;
+  memberships: Record<string, PartnerMembership>;
+  bookings: Record<string, ServiceBooking>;
+  transactions: Record<string, WalletTransaction[]>;
+  withdrawals: Record<string, WithdrawalRequest[]>;
+  notifications: Record<string, NotificationItem[]>;
+  tickets: Record<string, SupportTicket[]>;
+  screenVerifications: Record<string, ScreenCredentialRecord>;
+  wallets: Record<string, { partner_id: string; available_balance: number; pending_amount: number; updated_at: string }>;
+}
+
 class SupabaseService {
   private client: SupabaseClient | null = null;
   private channel: RealtimeChannel | null = null;
-  private localStoreMemoryCache: {
-    partners: Record<string, PartnerProfile>;
-    memberships: Record<string, PartnerMembership>;
-    bookings: Record<string, ServiceBooking>;
-    transactions: Record<string, WalletTransaction[]>;
-    withdrawals: Record<string, WithdrawalRequest[]>;
-    notifications: Record<string, NotificationItem[]>;
-    tickets: Record<string, SupportTicket[]>;
-  } | null = null;
+  private localStoreMemoryCache: LocalStorageStore | null = null;
 
   private config: SupabaseConfig = {
     url: DEFAULT_SUPABASE_URL,
@@ -120,6 +127,10 @@ class SupabaseService {
     return this.config;
   }
 
+  public getClient(): SupabaseClient | null {
+    return this.client;
+  }
+
   public setConfig(url: string, anonKey: string): boolean {
     try {
       localStorage.setItem(STORAGE_KEY_CONFIG, JSON.stringify({ url, anonKey }));
@@ -170,15 +181,26 @@ class SupabaseService {
   }
 
   // In-memory + LocalStorage persistence layer for zero-latency reads & offline resilience
-  private getLocalStore() {
+  private getLocalStore(): LocalStorageStore {
     if (this.localStoreMemoryCache) {
       return this.localStoreMemoryCache;
     }
     try {
       const data = localStorage.getItem(STORAGE_KEY_STORE_DATA);
       if (data) {
-        this.localStoreMemoryCache = JSON.parse(data);
-        return this.localStoreMemoryCache!;
+        const parsed = JSON.parse(data) as Partial<LocalStorageStore>;
+        this.localStoreMemoryCache = {
+          partners: parsed.partners || {},
+          memberships: parsed.memberships || {},
+          bookings: parsed.bookings || {},
+          transactions: parsed.transactions || {},
+          withdrawals: parsed.withdrawals || {},
+          notifications: parsed.notifications || {},
+          tickets: parsed.tickets || {},
+          screenVerifications: parsed.screenVerifications || {},
+          wallets: parsed.wallets || {}
+        };
+        return this.localStoreMemoryCache;
       }
     } catch {
       // ignore
@@ -190,12 +212,14 @@ class SupabaseService {
       transactions: {},
       withdrawals: {},
       notifications: {},
-      tickets: {}
+      tickets: {},
+      screenVerifications: {},
+      wallets: {}
     };
     return this.localStoreMemoryCache;
   }
 
-  private saveLocalStore(data: ReturnType<typeof this.getLocalStore>): void {
+  private saveLocalStore(data: LocalStorageStore): void {
     this.localStoreMemoryCache = data;
     try {
       localStorage.setItem(STORAGE_KEY_STORE_DATA, JSON.stringify(data));
@@ -291,6 +315,331 @@ class SupabaseService {
       profile,
       status: profile.status,
       message: 'Partner ID is verified and approved.'
+    };
+  }
+
+  /**
+   * Save and link 4-digit screen lock code with phone number in Supabase
+   */
+  public async storeScreenCredentials(
+    phone: string,
+    screenCode: string,
+    partnerId: string,
+    partnerName?: string
+  ): Promise<{ success: boolean; message: string; record?: ScreenCredentialRecord }> {
+    const cleanPhone = phone.trim().replace(/[^\d+]/g, '');
+    const cleanDigits = cleanPhone.replace(/\D/g, '');
+    if (cleanDigits.length < 10) {
+      return { success: false, message: 'Please provide a valid 10-digit mobile number.' };
+    }
+    const cleanCode = screenCode.trim();
+    if (!/^\d{4}$/.test(cleanCode)) {
+      return { success: false, message: 'Screen lock code must be exactly 4 numeric digits.' };
+    }
+
+    const timestamp = new Date().toISOString();
+    const record: ScreenCredentialRecord = {
+      phone: cleanPhone,
+      screen_code: cleanCode,
+      partner_id: partnerId,
+      partner_name: partnerName,
+      verified: true,
+      last_verified_at: timestamp,
+      created_at: timestamp,
+      updated_at: timestamp
+    };
+
+    // 1. Store in local persistent memory & storage
+    const store = this.getLocalStore();
+    if (!store.screenVerifications) store.screenVerifications = {};
+    store.screenVerifications[cleanPhone] = record;
+    store.screenVerifications[cleanDigits] = record;
+    if (store.partners[partnerId]) {
+      store.partners[partnerId].screen_lock_code = cleanCode;
+      store.partners[partnerId].is_screen_code_verified = true;
+      store.partners[partnerId].screen_code_verified_at = timestamp;
+    }
+    this.saveLocalStore(store);
+
+    // 2. Persist to Supabase with Turbo Engine
+    if (this.client) {
+      try {
+        await supabaseDataEngine.executeWrite(async () => {
+          const ops: Promise<unknown>[] = [];
+
+          // Upsert into doorbly_screen_verifications
+          ops.push(
+            (async () => {
+              return await this.client!
+                .from('doorbly_screen_verifications')
+                .upsert({
+                  phone: cleanPhone,
+                  screen_code: cleanCode,
+                  partner_id: partnerId,
+                  partner_name: partnerName || '',
+                  verified: true,
+                  last_verified_at: timestamp,
+                  updated_at: timestamp
+                });
+            })()
+          );
+
+          // Update doorbly_partners profile
+          if (partnerId) {
+            ops.push(
+              (async () => {
+                return await this.client!
+                  .from('doorbly_partners')
+                  .update({
+                    screen_lock_code: cleanCode,
+                    is_screen_code_verified: true,
+                    screen_code_verified_at: timestamp
+                  })
+                  .eq('id', partnerId);
+              })()
+            );
+          }
+
+          return await Promise.allSettled(ops);
+        }, [`profile:${partnerId}`, 'admin:partners']);
+      } catch (err) {
+        console.warn('Supabase storeScreenCredentials notice:', err);
+      }
+    }
+
+    return {
+      success: true,
+      message: '4-digit screen lock code stored & verified in Supabase!',
+      record
+    };
+  }
+
+  /**
+   * Verify phone number and 4-digit screen lock code genuinely against Supabase
+   */
+  public async verifyScreenCredentials(
+    phone: string,
+    screenCode: string
+  ): Promise<ScreenCodeVerificationResult> {
+    const cleanPhone = phone.trim().replace(/[^\d+]/g, '');
+    const cleanDigits = cleanPhone.replace(/\D/g, '');
+    if (cleanDigits.length < 10) {
+      return {
+        success: false,
+        isGenuine: false,
+        message: 'Please provide a valid 10-digit mobile number.'
+      };
+    }
+
+    const cleanCode = screenCode.trim();
+    if (!/^\d{4}$/.test(cleanCode)) {
+      return {
+        success: false,
+        isGenuine: false,
+        message: 'Screen lock code must be exactly 4 numeric digits.'
+      };
+    }
+
+    const timestamp = new Date().toISOString();
+
+    // Check directly in Supabase
+    if (this.client) {
+      try {
+        // Query doorbly_screen_verifications
+        const { data: verifData, error: verifErr } = await this.client
+          .from('doorbly_screen_verifications')
+          .select('*')
+          .or(`phone.eq.${cleanPhone},phone.eq.${cleanDigits}`)
+          .maybeSingle();
+
+        if (verifData) {
+          if (verifData.screen_code === cleanCode) {
+            void this.client
+              .from('doorbly_screen_verifications')
+              .update({ verified: true, last_verified_at: timestamp })
+              .eq('phone', verifData.phone);
+
+            let partnerProfile: PartnerProfile | null = null;
+            if (verifData.partner_id) {
+              partnerProfile = await this.getPartnerProfile(verifData.partner_id, true);
+            }
+
+            return {
+              success: true,
+              isGenuine: true,
+              message: '4-digit screen lock code verified successfully against Supabase!',
+              partner: partnerProfile || undefined
+            };
+          } else {
+            return {
+              success: false,
+              isGenuine: false,
+              message: 'Incorrect 4-digit screen lock code. Please enter the genuine code registered for this phone number.'
+            };
+          }
+        }
+
+        // Query doorbly_partners table by mobile
+        const { data: partnerData } = await this.client
+          .from('doorbly_partners')
+          .select('*')
+          .or(`mobile.eq.${cleanPhone},mobile.eq.${cleanDigits}`)
+          .maybeSingle();
+
+        if (partnerData) {
+          const profile = partnerData as PartnerProfile;
+          if (profile.screen_lock_code) {
+            if (profile.screen_lock_code === cleanCode) {
+              void this.client
+                .from('doorbly_partners')
+                .update({ is_screen_code_verified: true, screen_code_verified_at: timestamp })
+                .eq('id', profile.id);
+
+              return {
+                success: true,
+                isGenuine: true,
+                message: '4-digit screen lock code verified successfully against Supabase!',
+                partner: profile
+              };
+            } else {
+              return {
+                success: false,
+                isGenuine: false,
+                message: 'Incorrect 4-digit screen lock code. Please enter the genuine code for this registered partner.'
+              };
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Supabase verifyScreenCredentials notice:', err);
+      }
+    }
+
+    // Local persistent fallback
+    const store = this.getLocalStore();
+    const localVerif =
+      store.screenVerifications?.[cleanPhone] ||
+      store.screenVerifications?.[cleanDigits];
+
+    if (localVerif) {
+      if (localVerif.screen_code === cleanCode) {
+        localVerif.last_verified_at = timestamp;
+        this.saveLocalStore(store);
+        const p = store.partners[localVerif.partner_id];
+        return {
+          success: true,
+          isGenuine: true,
+          message: '4-digit screen lock code verified successfully!',
+          partner: p
+        };
+      } else {
+        return {
+          success: false,
+          isGenuine: false,
+          message: 'Incorrect 4-digit screen lock code. Please enter the genuine code.'
+        };
+      }
+    }
+
+    // Check partners in local store
+    for (const p of Object.values(store.partners)) {
+      const pClean = p.mobile.replace(/\D/g, '');
+      if (pClean === cleanDigits || p.mobile === cleanPhone) {
+        if (p.screen_lock_code) {
+          if (p.screen_lock_code === cleanCode) {
+            p.is_screen_code_verified = true;
+            p.screen_code_verified_at = timestamp;
+            this.saveLocalStore(store);
+            return {
+              success: true,
+              isGenuine: true,
+              message: '4-digit screen lock code verified successfully!',
+              partner: p
+            };
+          } else {
+            return {
+              success: false,
+              isGenuine: false,
+              message: 'Incorrect 4-digit screen lock code. Please enter the genuine code for this registered partner.'
+            };
+          }
+        }
+      }
+    }
+
+    return {
+      success: false,
+      isGenuine: false,
+      message: 'Mobile number not found in Supabase. Please complete registration with your 4-digit screen lock code first.'
+    };
+  }
+
+  /**
+   * Verify screen lock code specifically before allowing partner to go online
+   */
+  public async verifyPartnerScreenLockCodeForOnline(
+    partnerId: string,
+    phone: string,
+    screenCode: string
+  ): Promise<ScreenCodeVerificationResult> {
+    const cleanCode = screenCode.trim();
+    if (!/^\d{4}$/.test(cleanCode)) {
+      return {
+        success: false,
+        isGenuine: false,
+        message: 'Please enter a genuine 4-digit screen lock code.'
+      };
+    }
+
+    const partner = await this.getPartnerProfile(partnerId, true);
+    const store = this.getLocalStore();
+    const currentProfile = partner || store.partners[partnerId];
+
+    if (!currentProfile) {
+      return {
+        success: false,
+        isGenuine: false,
+        message: 'Partner profile not found in Supabase.'
+      };
+    }
+
+    // If partner already has a screen lock code configured:
+    if (currentProfile.screen_lock_code) {
+      if (currentProfile.screen_lock_code !== cleanCode) {
+        return {
+          success: false,
+          isGenuine: false,
+          message: 'Verification failed: 4-digit code does not match the screen lock code stored in Supabase.'
+        };
+      }
+      await this.storeScreenCredentials(currentProfile.mobile || phone, cleanCode, partnerId, currentProfile.name);
+      return {
+        success: true,
+        isGenuine: true,
+        message: 'Genuine 4-digit screen lock code verified in Supabase! You can now go Online.',
+        partner: currentProfile
+      };
+    }
+
+    // Check if phone was saved in screenVerifications
+    const verifRes = await this.verifyScreenCredentials(currentProfile.mobile || phone, cleanCode);
+    if (verifRes.success) {
+      await this.storeScreenCredentials(currentProfile.mobile || phone, cleanCode, partnerId, currentProfile.name);
+      return {
+        success: true,
+        isGenuine: true,
+        message: 'Genuine 4-digit screen lock code verified in Supabase! You can now go Online.',
+        partner: currentProfile
+      };
+    }
+
+    // If never set before, store it now and verify
+    await this.storeScreenCredentials(currentProfile.mobile || phone, cleanCode, partnerId, currentProfile.name);
+    return {
+      success: true,
+      isGenuine: true,
+      message: '4-digit screen lock code registered and verified in Supabase! You can now go Online.',
+      partner: currentProfile
     };
   }
 
@@ -565,13 +914,25 @@ class SupabaseService {
         }
       });
 
-      txList.forEach((tx) => {
-        if (tx.status === 'completed') {
-          if (tx.type === 'credit') available_balance += tx.amount;
-          if (tx.type === 'debit') available_balance -= tx.amount;
-        }
-      });
-      if (available_balance < 0) available_balance = 0;
+      if (!store.wallets) store.wallets = {};
+      if (store.wallets[partnerId] && typeof store.wallets[partnerId].available_balance === 'number') {
+        available_balance = store.wallets[partnerId].available_balance;
+        pending_amount = store.wallets[partnerId].pending_amount || 0;
+      } else {
+        txList.forEach((tx) => {
+          if (tx.status === 'completed') {
+            if (tx.type === 'credit') available_balance += tx.amount;
+            if (tx.type === 'debit') available_balance -= tx.amount;
+          }
+        });
+        if (available_balance < 0) available_balance = 0;
+        store.wallets[partnerId] = {
+          partner_id: partnerId,
+          available_balance,
+          pending_amount: 0,
+          updated_at: new Date().toISOString()
+        };
+      }
 
       return {
         available_balance,
@@ -662,17 +1023,28 @@ class SupabaseService {
           return { success: false, message: error.message };
         }
         if (data) {
-          await this.client.from('doorbly_partner_wallet_transactions').insert({
-            id: `tx_wth_${Date.now()}`,
-            partner_id: partnerId,
-            type: 'debit',
-            category: 'withdrawal',
-            amount,
-            balance_after: Math.max(0, wallet.available_balance - amount),
-            description: `Bank Withdrawal to ${bank_account.slice(-4).padStart(bank_account.length, '*')}`,
-            status: 'completed',
-            created_at: new Date().toISOString()
-          });
+          const newBal = Math.max(0, wallet.available_balance - amount);
+          await Promise.all([
+            this.client.from('doorbly_partner_wallets').upsert(
+              {
+                partner_id: partnerId,
+                available_balance: newBal,
+                updated_at: new Date().toISOString()
+              },
+              { onConflict: 'partner_id' }
+            ),
+            this.client.from('doorbly_partner_wallet_transactions').insert({
+              id: `tx_wth_${Date.now()}`,
+              partner_id: partnerId,
+              type: 'debit',
+              category: 'withdrawal',
+              amount,
+              balance_after: newBal,
+              description: `Bank Withdrawal to ${bank_account.slice(-4).padStart(bank_account.length, '*')}`,
+              status: 'completed',
+              created_at: new Date().toISOString()
+            })
+          ]);
           supabaseDataEngine.invalidate(`wallet:${partnerId}`);
           supabaseDataEngine.invalidate(`transactions:${partnerId}`);
           return { success: true, message: 'Withdrawal request submitted successfully.', withdrawal: data as WithdrawalRequest };
@@ -683,6 +1055,18 @@ class SupabaseService {
     }
 
     const store = this.getLocalStore();
+    if (!store.wallets) store.wallets = {};
+    if (!store.wallets[partnerId]) {
+      store.wallets[partnerId] = {
+        partner_id: partnerId,
+        available_balance: wallet.available_balance,
+        pending_amount: 0,
+        updated_at: new Date().toISOString()
+      };
+    }
+    store.wallets[partnerId].available_balance = Math.max(0, store.wallets[partnerId].available_balance - amount);
+    store.wallets[partnerId].updated_at = new Date().toISOString();
+
     if (!store.withdrawals[partnerId]) store.withdrawals[partnerId] = [];
     store.withdrawals[partnerId].unshift(newWithdrawal);
 
@@ -692,7 +1076,7 @@ class SupabaseService {
       type: 'debit',
       category: 'withdrawal',
       amount,
-      balance_after: Math.max(0, wallet.available_balance - amount),
+      balance_after: store.wallets[partnerId].available_balance,
       description: `Bank Withdrawal to ${bank_account.slice(-4).padStart(bank_account.length, '*')}`,
       status: 'completed',
       created_at: new Date().toISOString()
@@ -1018,7 +1402,15 @@ class SupabaseService {
           return { success: false, message: error.message };
         }
         if (data && status === 'COMPLETED') {
-          await this.creditPartnerEarnings(partnerId, data as ServiceBooking);
+          const bookingData = data as ServiceBooking;
+          const commissionableAmt = Number(bookingData.customer_price || bookingData.partner_earning || 1000);
+          const commResult = await subscriptionService.calculateAndRecordJobCommission(
+            bookingData.id,
+            partnerId,
+            commissionableAmt
+          );
+          bookingData.partner_earning = commResult.partnerEarnings;
+          await this.creditPartnerEarnings(partnerId, bookingData, commResult);
           supabaseDataEngine.invalidate(`wallet:${partnerId}`);
           supabaseDataEngine.invalidate(`transactions:${partnerId}`);
           supabaseDataEngine.invalidate(`notifications:${partnerId}`);
@@ -1045,76 +1437,151 @@ class SupabaseService {
     store.bookings[bookingId] = job;
 
     if (status === 'COMPLETED') {
-      const walletSummary = await this.getWalletSummary(partnerId);
-      const creditTx: WalletTransaction = {
-        id: `tx_cred_${Date.now()}`,
-        partner_id: partnerId,
-        booking_id: bookingId,
-        type: 'credit',
-        category: 'job_earning',
-        amount: job.partner_earning,
-        balance_after: walletSummary.available_balance + job.partner_earning,
-        description: `Earning for ${job.service_name} (#${job.id.substring(0, 8)})`,
-        status: 'completed',
-        created_at: new Date().toISOString()
-      };
-      if (!store.transactions[partnerId]) store.transactions[partnerId] = [];
-      store.transactions[partnerId].unshift(creditTx);
-
-      const notif: NotificationItem = {
-        id: `notif_${Date.now()}`,
-        partner_id: partnerId,
-        type: 'WALLET_CREDIT',
-        title: 'Earnings Credited! ₹' + job.partner_earning,
-        message: `Your earnings of ₹${job.partner_earning} for job #${job.id.substring(0, 8)} have been credited to your wallet.`,
-        is_read: false,
-        created_at: new Date().toISOString()
-      };
-      if (!store.notifications[partnerId]) store.notifications[partnerId] = [];
-      store.notifications[partnerId].unshift(notif);
+      const commissionableAmt = Number(job.customer_price || job.partner_earning || 1000);
+      const commResult = await subscriptionService.calculateAndRecordJobCommission(
+        job.id,
+        partnerId,
+        commissionableAmt
+      );
+      job.partner_earning = commResult.partnerEarnings;
+      await this.creditPartnerEarnings(partnerId, job, commResult);
     }
 
     this.saveLocalStore(store);
     supabaseDataEngine.invalidate(`jobs:${partnerId}`);
     supabaseDataEngine.invalidate(`activeJob:${partnerId}`);
     supabaseDataEngine.invalidate(`wallet:${partnerId}`);
+    supabaseDataEngine.invalidate(`transactions:${partnerId}`);
     supabaseDataEngine.invalidate(`notifications:${partnerId}`);
     return { success: true, message: `Status updated to ${status}`, booking: job };
   }
 
   /**
-   * Helper to credit wallet and create notification on Supabase
+   * Helper to credit wallet and create notification on Supabase & local storage
    */
-  private async creditPartnerEarnings(partnerId: string, booking: ServiceBooking): Promise<void> {
-    if (!this.client) return;
-    try {
-      const earning = Number(booking.partner_earning) || 0;
-      const nowIso = new Date().toISOString();
-      await Promise.all([
-        this.client.from('doorbly_partner_wallet_transactions').insert({
-          id: `tx_cred_${Date.now()}`,
-          partner_id: partnerId,
-          booking_id: booking.id,
-          type: 'credit',
-          category: 'job_earning',
-          amount: earning,
-          description: `Earning for ${booking.service_name} (#${booking.id.substring(0, 8)})`,
-          status: 'completed',
-          created_at: nowIso
-        }),
-        this.client.from('doorbly_partner_notifications').insert({
-          id: `notif_${Date.now()}`,
-          partner_id: partnerId,
-          type: 'WALLET_CREDIT',
-          title: `Earnings Credited! ₹${earning}`,
-          message: `Your earnings of ₹${earning} for job #${booking.id.substring(0, 8)} have been credited to your wallet.`,
-          is_read: false,
-          created_at: nowIso
-        })
-      ]);
-    } catch (e) {
-      console.warn('Failed to record credit transaction:', e);
+  private async creditPartnerEarnings(
+    partnerId: string,
+    booking: ServiceBooking,
+    commResult?: {
+      commissionPercent: number;
+      commissionAmount: number;
+      partnerEarnings: number;
+      planCode: string;
     }
+  ): Promise<{ available_balance: number; earning: number }> {
+    const earning = commResult?.partnerEarnings ?? (Number(booking.partner_earning) || 0);
+    const feeText = commResult
+      ? ` [${commResult.planCode.toUpperCase()} Plan: ${commResult.commissionPercent}% fee ₹${commResult.commissionAmount}]`
+      : '';
+    const nowIso = new Date().toISOString();
+    let finalBalance = 0;
+
+    // 1. If Supabase client is connected, update database tables
+    if (this.client) {
+      try {
+        const { data: existingWallet } = await this.client
+          .from('doorbly_partner_wallets')
+          .select('available_balance')
+          .eq('partner_id', partnerId)
+          .maybeSingle();
+
+        const currentBal = Number(existingWallet?.available_balance || 0);
+        finalBalance = currentBal + earning;
+
+        await Promise.all([
+          this.client.from('doorbly_partner_wallets').upsert(
+            {
+              partner_id: partnerId,
+              available_balance: finalBalance,
+              updated_at: nowIso
+            },
+            { onConflict: 'partner_id' }
+          ),
+          this.client.from('doorbly_partner_wallet_transactions').insert({
+            id: `tx_cred_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+            partner_id: partnerId,
+            booking_id: booking.id,
+            type: 'credit',
+            category: 'job_earning',
+            amount: earning,
+            balance_after: finalBalance,
+            description: `Earning for ${booking.service_name} (#${booking.id.substring(0, 8)})${feeText}`,
+            status: 'completed',
+            created_at: nowIso
+          }),
+          this.client.from('doorbly_partner_notifications').insert({
+            id: `notif_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+            partner_id: partnerId,
+            type: 'WALLET_CREDIT',
+            title: `Earnings Credited! ₹${earning.toLocaleString('en-IN')}`,
+            message: commResult
+              ? `Earned ₹${earning} on ₹${booking.customer_price || earning} order (${commResult.commissionPercent}% Doorbly fee: ₹${commResult.commissionAmount}). Credited to your wallet.`
+              : `Your earnings of ₹${earning} for job #${booking.id.substring(0, 8)} have been credited to your wallet.`,
+            is_read: false,
+            created_at: nowIso
+          })
+        ]);
+      } catch (e) {
+        console.warn('Failed to record credit transaction on Supabase:', e);
+      }
+    }
+
+    // 2. Always sync with Local Store for zero-latency UI and resilience
+    const store = this.getLocalStore();
+    if (!store.wallets) store.wallets = {};
+    if (!store.wallets[partnerId]) {
+      const existingTxs = store.transactions[partnerId] || [];
+      let baseBal = 0;
+      existingTxs.forEach((tx) => {
+        if (tx.status === 'completed') {
+          if (tx.type === 'credit') baseBal += tx.amount;
+          if (tx.type === 'debit') baseBal -= tx.amount;
+        }
+      });
+      store.wallets[partnerId] = {
+        partner_id: partnerId,
+        available_balance: baseBal,
+        pending_amount: 0,
+        updated_at: nowIso
+      };
+    }
+
+    store.wallets[partnerId].available_balance += earning;
+    store.wallets[partnerId].updated_at = nowIso;
+    finalBalance = store.wallets[partnerId].available_balance;
+
+    const creditTx: WalletTransaction = {
+      id: `tx_cred_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      partner_id: partnerId,
+      booking_id: booking.id,
+      type: 'credit',
+      category: 'job_earning',
+      amount: earning,
+      balance_after: finalBalance,
+      description: `Earning for ${booking.service_name} (#${booking.id.substring(0, 8)})${feeText}`,
+      status: 'completed',
+      created_at: nowIso
+    };
+    if (!store.transactions[partnerId]) store.transactions[partnerId] = [];
+    store.transactions[partnerId].unshift(creditTx);
+
+    const notif: NotificationItem = {
+      id: `notif_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      partner_id: partnerId,
+      type: 'WALLET_CREDIT',
+      title: `Earnings Credited! ₹${earning.toLocaleString('en-IN')}`,
+      message: commResult
+        ? `Earned ₹${earning} on ₹${booking.customer_price || earning} order (${commResult.commissionPercent}% commission: ₹${commResult.commissionAmount}). Credited to your wallet.`
+        : `Your earnings of ₹${earning} for job #${booking.id.substring(0, 8)} have been credited to your wallet.`,
+      is_read: false,
+      created_at: nowIso
+    };
+    if (!store.notifications[partnerId]) store.notifications[partnerId] = [];
+    store.notifications[partnerId].unshift(notif);
+
+    this.saveLocalStore(store);
+
+    return { available_balance: finalBalance, earning };
   }
 
   /**
@@ -1277,6 +1744,38 @@ class SupabaseService {
       target.is_read = true;
       this.saveLocalStore(store);
     }
+  }
+
+  /**
+   * Create Partner Notification
+   */
+  public async createNotification(
+    partnerId: string,
+    notif: { title: string; message: string; type?: NotificationItem['type'] }
+  ): Promise<void> {
+    const newNotif: NotificationItem = {
+      id: `notif_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      partner_id: partnerId,
+      type: notif.type || 'SYSTEM',
+      title: notif.title,
+      message: notif.message,
+      is_read: false,
+      created_at: new Date().toISOString()
+    };
+
+    if (this.client) {
+      try {
+        await this.client.from('doorbly_partner_notifications').insert(newNotif);
+      } catch (e) {
+        console.warn('createNotification Supabase notice:', e);
+      }
+    }
+
+    const store = this.getLocalStore();
+    if (!store.notifications[partnerId]) store.notifications[partnerId] = [];
+    store.notifications[partnerId].unshift(newNotif);
+    this.saveLocalStore(store);
+    supabaseDataEngine.invalidate(`notifications:${partnerId}`);
   }
 
   /**

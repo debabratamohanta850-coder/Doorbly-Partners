@@ -38,6 +38,10 @@ export interface PartnerProfile {
   working_area: string;
   preferred_radius_km: number;
   languages: string[];
+  screen_lock_code?: string; // 4-digit screen lock code stored in Supabase
+  is_screen_code_verified?: boolean; // Genuine verification status
+  screen_code_verified_at?: string;
+  auth_provider?: 'screen_code' | 'firebase' | 'otp' | 'email';
   status: PartnerStatus;
   status_reason?: string;
   is_online: boolean;
@@ -46,6 +50,24 @@ export interface PartnerProfile {
   last_location_update?: string;
   created_at: string;
   updated_at: string;
+}
+
+export interface ScreenCredentialRecord {
+  phone: string;
+  screen_code: string;
+  partner_id: string;
+  partner_name?: string;
+  verified: boolean;
+  last_verified_at?: string;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface ScreenCodeVerificationResult {
+  success: boolean;
+  message: string;
+  isGenuine: boolean;
+  partner?: PartnerProfile;
 }
 
 export interface PartnerMembership {
@@ -58,6 +80,104 @@ export interface PartnerMembership {
   expiry_date?: string;
   payment_status: 'paid' | 'pending' | 'failed';
   payment_reference?: string;
+  plan_code?: PlanCode;
+}
+
+export type PlanCode = 'starter' | 'growth' | 'professional';
+export type SubscriptionStatus = 'active' | 'expired' | 'cancelled' | 'pending';
+export type SubscriptionPaymentStatus = 'completed' | 'pending' | 'failed' | 'refunded';
+
+export interface SubscriptionTaxConfig {
+  is_tax_applicable: boolean;
+  default_tax_percent: number;
+}
+
+export interface SubscriptionPlan {
+  id: string;
+  plan_code: PlanCode;
+  plan_name: string;
+  monthly_price: number;
+  commission_percent: number;
+  tax_configuration: SubscriptionTaxConfig;
+  benefits: string[];
+  is_active: boolean;
+  is_recommended?: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PartnerSubscription {
+  id: string;
+  partner_id: string;
+  plan_id: string;
+  plan_code: PlanCode;
+  plan_name: string;
+  commission_percent: number;
+  status: SubscriptionStatus;
+  start_at: string;
+  expires_at: string;
+  auto_renew: boolean;
+  payment_status: 'paid' | 'pending' | 'failed' | 'free';
+  latest_payment_id?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SubscriptionPayment {
+  id: string;
+  partner_subscription_id: string;
+  partner_id: string;
+  plan_id: string;
+  plan_code: PlanCode;
+  amount_before_tax: number;
+  tax_rate_percent: number;
+  tax_amount: number;
+  total_amount: number;
+  currency: string;
+  payment_gateway: string;
+  gateway_payment_reference: string;
+  payment_status: SubscriptionPaymentStatus;
+  invoice_number: string;
+  created_at: string;
+}
+
+export interface JobCommissionRecord {
+  id: string;
+  job_id: string;
+  partner_id: string;
+  subscription_id: string;
+  plan_code_at_transaction: PlanCode;
+  commissionable_amount: number;
+  commission_percent: number;
+  commission_amount: number;
+  tax_amount_if_applicable: number;
+  partner_earnings: number;
+  transaction_status: 'calculated' | 'credited' | 'reversed';
+  created_at: string;
+}
+
+export interface TaxConfiguration {
+  id: string;
+  tax_name: string;
+  tax_rate_percent: number;
+  is_active: boolean;
+  hsn_sac_code: string;
+  gstin_number: string;
+  place_of_supply: string;
+  verification_required_notice: string;
+  updated_at: string;
+}
+
+export interface SubscriptionAuditLog {
+  id: string;
+  subscription_id: string;
+  partner_id: string;
+  admin_email: string;
+  action: string;
+  previous_state: string;
+  new_state: string;
+  reason: string;
+  created_at: string;
 }
 
 export interface ServiceCategory {
@@ -177,9 +297,11 @@ export type NotificationType =
   | 'WALLET_CREDIT'
   | 'WITHDRAWAL_UPDATE'
   | 'MEMBERSHIP_EXPIRY'
+  | 'MEMBERSHIP_UPDATE'
   | 'ACCOUNT_VERIFICATION'
   | 'DOCUMENT_EXPIRY'
-  | 'DOORBLY_ANNOUNCEMENT';
+  | 'DOORBLY_ANNOUNCEMENT'
+  | 'SYSTEM';
 
 export interface NotificationItem {
   id: string;

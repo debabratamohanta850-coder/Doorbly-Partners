@@ -630,6 +630,118 @@ export const SettingsView: React.FC = () => {
           </button>
         </div>
       </form>
+
+      {/* Supabase Subscription System SQL Script */}
+      <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
+            <ShieldCheck className="w-4 h-4 text-[#0F766E]" />
+            <span>Subscription &amp; Commission SQL Schema</span>
+          </h3>
+
+          <button
+            type="button"
+            onClick={() => {
+              const sql = `-- DOORBLY SUBSCRIPTION & COMMISSION MANAGEMENT TABLES
+
+CREATE TABLE IF NOT EXISTS public.doorbly_subscription_plans (
+  id TEXT PRIMARY KEY,
+  plan_code TEXT NOT NULL UNIQUE,
+  plan_name TEXT NOT NULL,
+  monthly_price NUMERIC NOT NULL DEFAULT 0,
+  commission_percent NUMERIC NOT NULL DEFAULT 20,
+  tax_configuration JSONB DEFAULT '{"is_tax_applicable": true, "default_tax_percent": 18}'::jsonb,
+  benefits JSONB DEFAULT '[]'::jsonb,
+  is_active BOOLEAN NOT NULL DEFAULT true,
+  is_recommended BOOLEAN DEFAULT false,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.doorbly_partner_subscriptions (
+  id TEXT PRIMARY KEY,
+  partner_id TEXT NOT NULL,
+  plan_id TEXT NOT NULL,
+  plan_code TEXT NOT NULL,
+  plan_name TEXT NOT NULL,
+  commission_percent NUMERIC NOT NULL DEFAULT 20,
+  status TEXT NOT NULL DEFAULT 'active',
+  start_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  expires_at TIMESTAMPTZ NOT NULL,
+  auto_renew BOOLEAN NOT NULL DEFAULT true,
+  payment_status TEXT NOT NULL DEFAULT 'paid',
+  latest_payment_id TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.doorbly_subscription_payments (
+  id TEXT PRIMARY KEY,
+  partner_subscription_id TEXT NOT NULL,
+  partner_id TEXT NOT NULL,
+  plan_id TEXT NOT NULL,
+  plan_code TEXT NOT NULL,
+  amount_before_tax NUMERIC NOT NULL DEFAULT 0,
+  tax_rate_percent NUMERIC NOT NULL DEFAULT 18,
+  tax_amount NUMERIC NOT NULL DEFAULT 0,
+  total_amount NUMERIC NOT NULL DEFAULT 0,
+  currency TEXT NOT NULL DEFAULT 'INR',
+  payment_gateway TEXT NOT NULL,
+  gateway_payment_reference TEXT NOT NULL,
+  payment_status TEXT NOT NULL DEFAULT 'completed',
+  invoice_number TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.doorbly_job_commission_records (
+  id TEXT PRIMARY KEY,
+  job_id TEXT NOT NULL,
+  partner_id TEXT NOT NULL,
+  subscription_id TEXT NOT NULL,
+  plan_code_at_transaction TEXT NOT NULL,
+  commissionable_amount NUMERIC NOT NULL,
+  commission_percent NUMERIC NOT NULL,
+  commission_amount NUMERIC NOT NULL,
+  tax_amount_if_applicable NUMERIC DEFAULT 0,
+  partner_earnings NUMERIC NOT NULL,
+  transaction_status TEXT NOT NULL DEFAULT 'credited',
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.doorbly_tax_configurations (
+  id TEXT PRIMARY KEY,
+  tax_name TEXT NOT NULL,
+  tax_rate_percent NUMERIC NOT NULL DEFAULT 18,
+  is_active BOOLEAN NOT NULL DEFAULT true,
+  hsn_sac_code TEXT NOT NULL DEFAULT '998314',
+  gstin_number TEXT,
+  place_of_supply TEXT,
+  verification_required_notice TEXT,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Seed Default Plans (Starter, Growth, Professional)
+INSERT INTO public.doorbly_subscription_plans (id, plan_code, plan_name, monthly_price, commission_percent, benefits, is_recommended, is_active)
+VALUES 
+  ('plan_starter', 'starter', 'Starter', 0, 20, '["₹0 per month - No fee required", "20% company commission", "Partner retains 80% (₹800/₹1k)", "Standard job notifications"]'::jsonb, false, true),
+  ('plan_growth', 'growth', 'Growth', 370, 12, '["12% company commission", "Partner retains 88% (₹880/₹1k)", "Priority job notifications", "Recommended plan", "Monthly reminders"]'::jsonb, true, true),
+  ('plan_professional', 'professional', 'Professional', 799, 7, '["7% lowest company commission", "Partner retains 93% (₹930/₹1k)", "Top priority leads", "Priority partner support"]'::jsonb, false, true)
+ON CONFLICT (id) DO NOTHING;`;
+              navigator.clipboard?.writeText(sql);
+              setCopiedFcm(true);
+              setTimeout(() => setCopiedFcm(false), 2000);
+            }}
+            className="py-1 px-3 rounded-lg bg-teal-50 hover:bg-teal-100 text-[#0F766E] font-bold text-xs flex items-center gap-1 cursor-pointer transition-colors"
+          >
+            <Copy className="w-3.5 h-3.5" />
+            <span>{copiedFcm ? 'Copied SQL!' : 'Copy SQL Script'}</span>
+          </button>
+        </div>
+
+        <p className="text-xs text-slate-500 leading-relaxed">
+          Create the tables for subscription plans, partner subscriptions, payment invoices, immutable job commissions, and tax configurations in your Supabase SQL Editor.
+        </p>
+      </div>
     </div>
   );
 };

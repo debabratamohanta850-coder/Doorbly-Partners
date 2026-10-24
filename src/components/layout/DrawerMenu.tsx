@@ -25,7 +25,7 @@ interface DrawerMenuProps {
 }
 
 export const DrawerMenu: React.FC<DrawerMenuProps> = ({ isOpen, onClose }) => {
-  const { partner, membership, activeTab, setActiveTab, logout, isAdminUnlocked, setViewMode } = usePartner();
+  const { partner, membership, activeSubscription, activeTab, setActiveTab, logout, isAdminUnlocked, setViewMode } = usePartner();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [confirmingLogout, setConfirmingLogout] = useState(false);
 
@@ -62,7 +62,12 @@ export const DrawerMenu: React.FC<DrawerMenuProps> = ({ isOpen, onClose }) => {
     {
       title: 'Partner Account',
       items: [
-        { tab: 'membership' as NavigationTab, label: '₹370 Monthly Membership', icon: ShieldCheck, badge: membership?.status === 'active' ? 'Active' : 'Renew' },
+        {
+          tab: 'membership' as NavigationTab,
+          label: 'My Subscription',
+          icon: ShieldCheck,
+          badge: activeSubscription?.plan_name || (membership?.status === 'active' ? 'Active' : 'Renew')
+        },
         { tab: 'services' as NavigationTab, label: 'Professions', icon: Wrench },
         { tab: 'notifications' as NavigationTab, label: 'Notification Center', icon: Bell },
         { tab: 'profile' as NavigationTab, label: 'My Profile', icon: User },

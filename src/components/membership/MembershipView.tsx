@@ -1,253 +1,320 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { usePartner } from '../../context/PartnerContext';
+import { subscriptionService } from '../../services/subscriptionService';
+import { SubscriptionPayment, SubscriptionPlan } from '../../types';
+import { SubscriptionCards } from '../subscription/SubscriptionCards';
+import { InvoiceModal } from '../subscription/InvoiceModal';
 import {
   ShieldCheck,
   CheckCircle2,
   Calendar,
   AlertCircle,
-  CreditCard,
-  QrCode,
+  FileText,
+  Clock,
+  Coins,
   Sparkles,
-  Zap,
   ArrowRight,
-  Loader2,
-  Clock
+  TrendingUp,
+  Download,
+  Info,
+  Check,
+  X
 } from 'lucide-react';
 
 export const MembershipView: React.FC = () => {
-  const { membership, updateMembership, partner } = usePartner();
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [showPaymentSheet, setShowPaymentSheet] = useState(false);
-  const [paymentStep, setPaymentStep] = useState<'select' | 'pending_verification'>('select');
+  const { partner, activeSubscription, taxConfig, refreshAll } = usePartner();
+  const [payments, setPayments] = useState<SubscriptionPayment[]>([]);
+  const [selectedInvoice, setSelectedInvoice] = useState<SubscriptionPayment | null>(null);
+  const [isLoadingInvoices, setIsLoadingInvoices] = useState(false);
 
-  const isActive = membership?.status === 'active';
+  const activePlanCode = activeSubscription?.plan_code || 'starter';
 
-  const handleInitiatePayment = () => {
-    setShowPaymentSheet(true);
-    setPaymentStep('select');
+  const loadPayments = async () => {
+    if (!partner?.id) return;
+    setIsLoadingInvoices(true);
+    try {
+      const history = await subscriptionService.getPartnerPaymentsAndInvoices(partner.id);
+      setPayments(history);
+    } finally {
+      setIsLoadingInvoices(false);
+    }
   };
 
-  const handleSimulatePaymentGateway = async () => {
-    setIsProcessing(true);
-    // Real backend-ready flow: creates order / pending verification
-    setTimeout(async () => {
-      setIsProcessing(false);
-      setPaymentStep('pending_verification');
-    }, 1200);
-  };
+  useEffect(() => {
+    loadPayments();
+  }, [partner?.id, activeSubscription?.id]);
 
-  const handleActivatePlanForTesting = async () => {
-    setIsProcessing(true);
-    await updateMembership('active');
-    setIsProcessing(false);
-    setShowPaymentSheet(false);
-  };
+  const daysRemaining = activeSubscription?.expires_at
+    ? Math.max(0, Math.ceil((new Date(activeSubscription.expires_at).getTime() - Date.now()) / 86400000))
+    : 0;
 
   return (
-    <div className="space-y-4 pb-20">
-      {/* Title */}
+    <div className="space-y-5 pb-24 text-slate-800">
+      {/* View Header */}
       <div>
-        <h2 className="text-xl font-extrabold text-slate-900 tracking-tight">
-          Partner Membership
+        <div className="flex items-center gap-2">
+          <span className="text-xs uppercase font-extrabold text-[#0F766E] tracking-wider">
+            PARTNER MEMBERSHIP &amp; COMMISSIONS
+          </span>
+        </div>
+        <h2 className="text-xl font-black text-slate-900 tracking-tight mt-0.5">
+          My Subscription
         </h2>
-        <p className="text-xs text-slate-500 mt-0.5">
-          Mandatory monthly partner subscription to receive nearby customer bookings.
+        <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
+          Choose a subscription plan to minimize Doorbly platform commissions and maximize your take-home earnings on every doorstep job.
         </p>
       </div>
 
-      {/* Membership Card (Faded Sky Colour) */}
-      <div className="bg-gradient-to-br from-sky-50 via-sky-100/80 to-sky-50 text-slate-900 rounded-3xl p-6 shadow-xs border border-sky-200/90 relative overflow-hidden">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <ShieldCheck className="w-5 h-5 text-sky-600" />
-            <span className="font-bold text-xs uppercase tracking-wider text-sky-800">
-              DOORBLY PRO PARTNER
+      {/* Active Subscription Summary Banner */}
+      {activeSubscription && (
+        <div className="bg-gradient-to-br from-[#0F766E] to-teal-800 text-white rounded-3xl p-5 shadow-md relative overflow-hidden">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="w-5 h-5 text-teal-300" />
+              <span className="font-extrabold text-xs uppercase tracking-wider text-teal-100">
+                ACTIVE PLAN
+              </span>
+            </div>
+
+            <span className="px-3 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-white/20 text-white border border-white/30 backdrop-blur-xs">
+              {activeSubscription.status === 'active' ? 'ACTIVE & ONLINE ELIGIBLE' : 'RENEWAL DUE'}
             </span>
           </div>
 
-          <div
-            className={`px-3 py-1 rounded-full text-[11px] font-bold tracking-wider uppercase ${
-              isActive
-                ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
-                : 'bg-amber-100 text-amber-800 border border-amber-200'
-            }`}
-          >
-            {isActive ? 'ACTIVE PLAN' : 'RENEWAL DUE'}
-          </div>
-        </div>
+          <div className="mt-3 flex items-baseline justify-between">
+            <div>
+              <div className="text-2xl font-black tracking-tight capitalize">
+                {activeSubscription.plan_name}
+              </div>
+              <p className="text-xs text-teal-100 mt-0.5">
+                Company Commission: <strong>{activeSubscription.commission_percent}%</strong> per completed service
+              </p>
+            </div>
 
-        {/* Pricing Head */}
-        <div className="mt-4">
-          <div className="flex items-baseline">
-            <span className="text-3xl font-black tracking-tight text-slate-900">₹370</span>
-            <span className="text-sky-700 text-xs ml-1.5 font-medium">/ 30 Days</span>
+            <div className="text-right">
+              <span className="text-[10px] uppercase font-bold text-teal-200 block">Earnings Retention</span>
+              <span className="text-xl font-black text-amber-300">
+                {100 - activeSubscription.commission_percent}%
+              </span>
+            </div>
           </div>
-          <p className="text-xs text-slate-600 mt-1">
-            Unlimited customer doorstep leads, zero upfront commission cap, verified badge.
-          </p>
-        </div>
 
-        {/* Validity Dates */}
-        <div className="mt-5 pt-4 border-t border-sky-200/80 grid grid-cols-2 gap-3 text-xs">
-          <div>
-            <span className="text-sky-700/80 block text-[10px] uppercase font-bold">
-              Start Date
-            </span>
-            <span className="font-semibold text-slate-900">
-              {membership?.start_date
-                ? new Date(membership.start_date).toLocaleDateString()
-                : 'Not Started'}
-            </span>
-          </div>
-          <div>
-            <span className="text-sky-700/80 block text-[10px] uppercase font-bold">
-              Expiry Date
-            </span>
-            <span className="font-semibold text-slate-900">
-              {membership?.expiry_date
-                ? new Date(membership.expiry_date).toLocaleDateString()
-                : 'Not Set'}
-            </span>
-          </div>
-        </div>
-      </div>
+          {/* Dates & Validity Grid */}
+          <div className="mt-4 pt-3 border-t border-teal-600/60 grid grid-cols-3 gap-2 text-xs">
+            <div>
+              <span className="text-teal-200 block text-[10px] uppercase font-bold">Start Date</span>
+              <span className="font-semibold text-white">
+                {activeSubscription.start_at
+                  ? new Date(activeSubscription.start_at).toLocaleDateString('en-IN', {
+                      day: 'numeric',
+                      month: 'short'
+                    })
+                  : 'Active'}
+              </span>
+            </div>
 
-      {/* Action CTA */}
-      {!isActive ? (
-        <button
-          onClick={handleInitiatePayment}
-          className="w-full py-4 px-6 bg-[#0F766E] hover:bg-teal-700 active:bg-teal-800 text-white font-extrabold text-sm rounded-2xl shadow-md flex items-center justify-center gap-2 transition-all"
-        >
-          <Zap className="w-4 h-4 text-amber-300" />
-          <span>SUBSCRIBE / RENEW FOR ₹370</span>
-        </button>
-      ) : (
-        <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 flex items-center gap-3">
-          <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
-          <div className="text-xs text-emerald-900">
-            <p className="font-bold">Membership is Active</p>
-            <p className="text-emerald-700 text-[11px] mt-0.5">
-              You are eligible to switch Online and receive incoming service requests.
-            </p>
+            <div>
+              <span className="text-teal-200 block text-[10px] uppercase font-bold">Expiry Date</span>
+              <span className="font-semibold text-white">
+                {activeSubscription.expires_at
+                  ? new Date(activeSubscription.expires_at).toLocaleDateString('en-IN', {
+                      day: 'numeric',
+                      month: 'short'
+                    })
+                  : 'N/A'}
+              </span>
+            </div>
+
+            <div className="text-right">
+              <span className="text-teal-200 block text-[10px] uppercase font-bold">Days Left</span>
+              <span className="font-bold text-amber-300">
+                {activeSubscription.plan_code === 'starter' ? 'Unlimited' : `${daysRemaining} Days`}
+              </span>
+            </div>
           </div>
         </div>
       )}
 
-      {/* Membership Benefits List */}
-      <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs space-y-3">
-        <h3 className="font-bold text-slate-900 text-sm">
-          Included with Doorbly Partner Membership
-        </h3>
+      {/* Subscription Cards Section */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="font-extrabold text-sm text-slate-900 tracking-tight">
+              Select Subscription Plan
+            </h3>
+            <p className="text-[11px] text-slate-500">
+              Pick the right tier for your doorstep service volume.
+            </p>
+          </div>
+        </div>
 
-        <div className="space-y-2.5 text-xs text-slate-700">
-          <div className="flex items-start gap-2.5">
-            <CheckCircle2 className="w-4 h-4 text-[#0F766E] shrink-0 mt-0.5" />
-            <span>Receive live doorstep jobs matched within your service radius</span>
-          </div>
-          <div className="flex items-start gap-2.5">
-            <CheckCircle2 className="w-4 h-4 text-[#0F766E] shrink-0 mt-0.5" />
-            <span>Guaranteed earnings credited directly to your partner wallet</span>
-          </div>
-          <div className="flex items-start gap-2.5">
-            <CheckCircle2 className="w-4 h-4 text-[#0F766E] shrink-0 mt-0.5" />
-            <span>Customer navigation & turn-by-turn doorstep directions</span>
-          </div>
-          <div className="flex items-start gap-2.5">
-            <CheckCircle2 className="w-4 h-4 text-[#0F766E] shrink-0 mt-0.5" />
-            <span>24/7 dedicated partner operations & safety helpline</span>
-          </div>
-          <div className="flex items-start gap-2.5">
-            <CheckCircle2 className="w-4 h-4 text-[#0F766E] shrink-0 mt-0.5" />
-            <span>Zero hidden cancellation penalties on verified jobs</span>
-          </div>
+        <SubscriptionCards onPlanActivated={loadPayments} />
+      </div>
+
+      {/* Detailed Plan Comparison Table */}
+      <div className="bg-white rounded-3xl p-5 border border-slate-200 shadow-xs space-y-3.5">
+        <div>
+          <h3 className="font-bold text-slate-900 text-sm">
+            Subscription Plan Comparison
+          </h3>
+          <p className="text-xs text-slate-500 mt-0.5">
+            Compare features, company commissions, and partner retention rates.
+          </p>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs border-collapse">
+            <thead>
+              <tr className="border-b border-slate-200 text-[10px] uppercase tracking-wider text-slate-500">
+                <th className="py-2.5 pr-2 font-bold">Benefit / Metric</th>
+                <th className="py-2.5 px-2 text-center font-bold text-slate-700">Starter</th>
+                <th className="py-2.5 px-2 text-center font-bold text-[#0F766E] bg-teal-50/50 rounded-t-lg">
+                  Growth (Rec.)
+                </th>
+                <th className="py-2.5 pl-2 text-center font-bold text-purple-700">Professional</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 text-[11px] text-slate-700">
+              <tr>
+                <td className="py-2.5 pr-2 font-semibold">Monthly Price</td>
+                <td className="py-2.5 px-2 text-center font-mono font-bold">₹0</td>
+                <td className="py-2.5 px-2 text-center font-mono font-bold text-[#0F766E] bg-teal-50/50">
+                  ₹370 + tax
+                </td>
+                <td className="py-2.5 pl-2 text-center font-mono font-bold text-purple-700">
+                  ₹799 + tax
+                </td>
+              </tr>
+              <tr>
+                <td className="py-2.5 pr-2 font-semibold">Company Commission</td>
+                <td className="py-2.5 px-2 text-center font-bold text-rose-600">20%</td>
+                <td className="py-2.5 px-2 text-center font-bold text-[#0F766E] bg-teal-50/50">12%</td>
+                <td className="py-2.5 pl-2 text-center font-bold text-purple-700">7% (Lowest)</td>
+              </tr>
+              <tr>
+                <td className="py-2.5 pr-2 font-semibold">Partner Retention (%)</td>
+                <td className="py-2.5 px-2 text-center font-bold">80%</td>
+                <td className="py-2.5 px-2 text-center font-bold text-[#0F766E] bg-teal-50/50">88%</td>
+                <td className="py-2.5 pl-2 text-center font-bold text-purple-700">93%</td>
+              </tr>
+              <tr>
+                <td className="py-2.5 pr-2 font-semibold">You Keep on ₹1,000 Job</td>
+                <td className="py-2.5 px-2 text-center font-mono font-bold text-slate-800">₹800</td>
+                <td className="py-2.5 px-2 text-center font-mono font-bold text-[#0F766E] bg-teal-50/50">
+                  ₹880 (+₹80)
+                </td>
+                <td className="py-2.5 pl-2 text-center font-mono font-bold text-purple-700">
+                  ₹930 (+₹130)
+                </td>
+              </tr>
+              <tr>
+                <td className="py-2.5 pr-2 font-semibold">Job Notifications</td>
+                <td className="py-2.5 px-2 text-center text-slate-500">Standard</td>
+                <td className="py-2.5 px-2 text-center font-bold text-teal-800 bg-teal-50/50">Priority</td>
+                <td className="py-2.5 pl-2 text-center font-bold text-purple-800">Top Priority</td>
+              </tr>
+              <tr>
+                <td className="py-2.5 pr-2 font-semibold">Partner Support</td>
+                <td className="py-2.5 px-2 text-center text-slate-500">Standard</td>
+                <td className="py-2.5 px-2 text-center text-slate-600 bg-teal-50/50">Standard</td>
+                <td className="py-2.5 pl-2 text-center font-bold text-purple-800">Priority Phone</td>
+              </tr>
+              <tr>
+                <td className="py-2.5 pr-2 font-semibold">Subscription Expiry Reminders</td>
+                <td className="py-2.5 px-2 text-center text-slate-400">—</td>
+                <td className="py-2.5 px-2 text-center text-emerald-600 bg-teal-50/50">✓ Included</td>
+                <td className="py-2.5 pl-2 text-center text-emerald-600">✓ Included</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
 
-      {/* Payment Gateway Modal / Sheet */}
-      {showPaymentSheet && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-900/60 backdrop-blur-xs">
-          <div className="bg-white rounded-t-3xl sm:rounded-3xl p-6 max-w-sm w-full shadow-2xl space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="font-extrabold text-base text-slate-900">
-                  Subscribe to Doorbly Partner
-                </h3>
-                <p className="text-xs text-slate-500">Plan Amount: <strong>₹370 (Inclusive of GST)</strong></p>
-              </div>
-              <button
-                onClick={() => setShowPaymentSheet(false)}
-                className="text-slate-400 hover:text-slate-600 p-1"
+      {/* Subscription Invoices & Payment History */}
+      <div className="bg-white rounded-3xl p-5 border border-slate-200 shadow-xs space-y-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
+              <FileText className="w-4 h-4 text-[#0F766E]" />
+              <span>Subscription Invoices &amp; Receipts</span>
+            </h3>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Download tax invoices for accounting and tax records.
+            </p>
+          </div>
+
+          <span className="text-[11px] font-bold text-slate-500">
+            {payments.length} {payments.length === 1 ? 'Record' : 'Records'}
+          </span>
+        </div>
+
+        {payments.length === 0 ? (
+          <div className="p-6 text-center bg-slate-50 rounded-2xl border border-dashed border-slate-200 text-xs text-slate-500">
+            No paid subscription invoices yet. When you activate Growth or Professional, your official GST tax invoices will appear here.
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {payments.map((payment) => (
+              <div
+                key={payment.id}
+                className="p-3.5 rounded-2xl border border-slate-200/90 bg-slate-50/60 hover:bg-white transition-colors flex items-center justify-between gap-3 text-xs"
               >
-                ✕
-              </button>
-            </div>
-
-            {paymentStep === 'select' ? (
-              <div className="space-y-3">
-                <p className="text-xs text-slate-600">
-                  Select payment method:
-                </p>
-
-                <div
-                  onClick={handleSimulatePaymentGateway}
-                  className="p-3.5 border border-slate-200 hover:border-teal-600 rounded-2xl flex items-center justify-between cursor-pointer group"
-                >
-                  <div className="flex items-center gap-3">
-                    <QrCode className="w-5 h-5 text-teal-700" />
-                    <div>
-                      <div className="font-bold text-xs text-slate-900">UPI / QR Code</div>
-                      <div className="text-[10px] text-slate-500">GPay, PhonePe, Paytm, BHIM</div>
-                    </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono font-bold text-slate-900 text-xs">
+                      {payment.invoice_number}
+                    </span>
+                    <span className="px-2 py-0.2 rounded-md bg-emerald-100 text-emerald-800 font-bold text-[10px] uppercase">
+                      {payment.payment_status}
+                    </span>
                   </div>
-                  <ArrowRight className="w-4 h-4 text-slate-300 group-hover:text-teal-700" />
+
+                  <div className="text-slate-500 text-[11px] mt-1">
+                    {payment.plan_code.toUpperCase()} Plan · {payment.payment_gateway} ·{' '}
+                    {new Date(payment.created_at).toLocaleDateString('en-IN', {
+                      day: 'numeric',
+                      month: 'short',
+                      year: 'numeric'
+                    })}
+                  </div>
                 </div>
 
-                <div
-                  onClick={handleSimulatePaymentGateway}
-                  className="p-3.5 border border-slate-200 hover:border-teal-600 rounded-2xl flex items-center justify-between cursor-pointer group"
-                >
-                  <div className="flex items-center gap-3">
-                    <CreditCard className="w-5 h-5 text-teal-700" />
-                    <div>
-                      <div className="font-bold text-xs text-slate-900">Debit / Credit Card</div>
-                      <div className="text-[10px] text-slate-500">Visa, Mastercard, RuPay</div>
+                <div className="flex items-center gap-3">
+                  <div className="text-right">
+                    <div className="font-black text-slate-900 font-mono text-sm">
+                      ₹{payment.total_amount.toFixed(2)}
                     </div>
+                    {payment.tax_amount > 0 && (
+                      <div className="text-[10px] text-slate-400">
+                        incl. ₹{payment.tax_amount.toFixed(2)} GST
+                      </div>
+                    )}
                   </div>
-                  <ArrowRight className="w-4 h-4 text-slate-300 group-hover:text-teal-700" />
-                </div>
 
-                <div className="pt-2">
                   <button
-                    onClick={handleActivatePlanForTesting}
-                    disabled={isProcessing}
-                    className="w-full py-3 bg-teal-50 hover:bg-teal-100 text-[#0F766E] font-bold text-xs rounded-xl border border-teal-200 flex items-center justify-center gap-1.5"
+                    type="button"
+                    onClick={() => setSelectedInvoice(payment)}
+                    className="p-2 rounded-xl bg-teal-50 hover:bg-teal-100 text-[#0F766E] border border-teal-200/80 transition-colors cursor-pointer"
+                    title="View & Download Invoice"
                   >
-                    <span>Activate Plan (Development Mode)</span>
+                    <Download className="w-4 h-4" />
                   </button>
                 </div>
               </div>
-            ) : (
-              <div className="space-y-3 text-center py-3">
-                <div className="w-12 h-12 rounded-full bg-amber-50 text-amber-600 flex items-center justify-center mx-auto">
-                  <Clock className="w-6 h-6 animate-pulse" />
-                </div>
-                <h4 className="font-bold text-slate-900 text-sm">
-                  Payment Order Created (₹370)
-                </h4>
-                <p className="text-xs text-slate-500">
-                  Payment gateway integration ready. Once your bank UPI/Gateway payment completes, your membership activates automatically.
-                </p>
-
-                <button
-                  onClick={handleActivatePlanForTesting}
-                  className="w-full py-3 bg-[#0F766E] text-white font-bold text-xs rounded-xl"
-                >
-                  Confirm & Activate Now
-                </button>
-              </div>
-            )}
+            ))}
           </div>
-        </div>
+        )}
+      </div>
+
+      {/* Invoice Viewer Modal */}
+      {selectedInvoice && (
+        <InvoiceModal
+          payment={selectedInvoice}
+          taxConfig={taxConfig}
+          partnerName={partner?.name}
+          partnerPhone={partner?.mobile}
+          onClose={() => setSelectedInvoice(null)}
+        />
       )}
     </div>
   );

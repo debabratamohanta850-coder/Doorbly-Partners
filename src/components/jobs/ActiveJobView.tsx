@@ -12,13 +12,17 @@ import {
   FileText,
   Loader2,
   Check,
-  X
+  X,
+  Wallet,
+  Banknote,
+  CreditCard,
+  Sparkles
 } from 'lucide-react';
 import { locationService } from '../../services/locationService';
 import { DEFAULT_DOORBLY_SERVICES } from '../../services/catalogueService';
 
 export const ActiveJobView: React.FC = () => {
-  const { activeJob, updateActiveJobStatus, setActiveTab } = usePartner();
+  const { activeJob, updateActiveJobStatus, setActiveTab, activeSubscription } = usePartner();
 
   const [otpInput, setOtpInput] = useState('');
   const [otpError, setOtpError] = useState('');
@@ -27,6 +31,7 @@ export const ActiveJobView: React.FC = () => {
   const [showAddServiceModal, setShowAddServiceModal] = useState(false);
   const [showNoteModal, setShowNoteModal] = useState(false);
   const [newNote, setNewNote] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'online'>('cash');
   const [isProcessing, setIsProcessing] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
@@ -140,8 +145,16 @@ export const ActiveJobView: React.FC = () => {
   const handleCompleteServiceSubmit = async () => {
     setIsProcessing(true);
     try {
+      const customerAmt = Number(activeJob.customer_price || activeJob.partner_earning || 1000);
+      const commRate = activeSubscription?.commission_percent ?? 20;
+      const planName = activeSubscription?.plan_name ?? 'Starter Plan';
+      const commAmt = Math.round((customerAmt * commRate) / 100);
+      const partnerAmt = customerAmt - commAmt;
+
+      const paymentNote = `Payment Mode: ${paymentMethod === 'cash' ? 'Cash on Delivery (₹' + customerAmt + ')' : 'Online UPI / Digital (₹' + customerAmt + ')'}. Subscription: ${planName} (${commRate}% fee: ₹${commAmt}). Credited to wallet: ₹${partnerAmt}.${newNote ? ' Note: ' + newNote : ''}`;
+
       const ok = await updateActiveJobStatus('COMPLETED', {
-        notes: newNote ? `Completion note: ${newNote}` : undefined
+        notes: paymentNote
       });
       if (ok) {
         setShowCompleteModal(false);
@@ -576,67 +589,147 @@ export const ActiveJobView: React.FC = () => {
         </div>
       )}
 
-      {/* Completion Modal */}
-      {showCompleteModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
-          <div className="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="font-extrabold text-lg text-slate-900">
-                Complete Service
-              </h3>
-              <button
-                onClick={() => setShowCompleteModal(false)}
-                className="p-1 rounded-lg text-slate-400 hover:text-slate-600"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
+      {/* Completion & Payment Collection Modal */}
+      {showCompleteModal && (() => {
+        const customerAmt = Number(activeJob.customer_price || activeJob.partner_earning || 1000);
+        const commRate = activeSubscription?.commission_percent ?? 20;
+        const planName = activeSubscription?.plan_name ?? 'Starter Plan';
+        const commAmt = Math.round((customerAmt * commRate) / 100);
+        const partnerAmt = customerAmt - commAmt;
 
-            <div className="bg-emerald-50 rounded-2xl p-4 border border-emerald-200 space-y-2">
-              <div className="flex items-center justify-between text-xs text-emerald-900 font-semibold">
-                <span>Partner Earning Credited</span>
-                <span className="text-base font-extrabold text-emerald-900">₹{activeJob.partner_earning}</span>
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+            <div className="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl space-y-4 max-h-[92vh] overflow-y-auto">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="font-extrabold text-base text-slate-900">
+                    Payment Collection & Complete
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    Verify payment collection & credit partner wallet
+                  </p>
+                </div>
+                <button
+                  onClick={() => setShowCompleteModal(false)}
+                  className="p-1 rounded-lg text-slate-400 hover:text-slate-600 cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
               </div>
-              <div className="flex items-center justify-between text-[11px] text-emerald-700">
-                <span>Customer Amount</span>
-                <span>₹{activeJob.customer_price}</span>
+
+              {/* Payment Method Selector */}
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1.5">
+                  Customer Payment Method
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPaymentMethod('cash')}
+                    className={`p-3 rounded-2xl border text-left flex flex-col gap-1 transition-all cursor-pointer ${
+                      paymentMethod === 'cash'
+                        ? 'border-[#0F766E] bg-teal-50/70 ring-1 ring-[#0F766E]'
+                        : 'border-slate-200 bg-white hover:bg-slate-50'
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-slate-900">
+                      <Banknote className="w-4 h-4 text-[#0F766E]" />
+                      <span>Cash Collected</span>
+                    </div>
+                    <span className="text-[10px] text-slate-500">Cash received from customer</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setPaymentMethod('online')}
+                    className={`p-3 rounded-2xl border text-left flex flex-col gap-1 transition-all cursor-pointer ${
+                      paymentMethod === 'online'
+                        ? 'border-[#0F766E] bg-teal-50/70 ring-1 ring-[#0F766E]'
+                        : 'border-slate-200 bg-white hover:bg-slate-50'
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-slate-900">
+                      <CreditCard className="w-4 h-4 text-[#0F766E]" />
+                      <span>Online UPI / App</span>
+                    </div>
+                    <span className="text-[10px] text-slate-500">Pre-paid / UPI digital</span>
+                  </button>
+                </div>
               </div>
-            </div>
 
-            <div>
-              <label className="text-xs font-semibold text-slate-700 block mb-1">
-                Optional Completion Note / Remarks
-              </label>
-              <textarea
-                value={newNote}
-                onChange={(e) => setNewNote(e.target.value)}
-                placeholder="Work done properly, customer satisfied..."
-                rows={2}
-                className="w-full text-xs p-3 border border-slate-200 rounded-xl focus:border-[#0F766E] focus:outline-hidden"
-              />
-            </div>
+              {/* Commission & Net Partner Earnings Breakdown */}
+              <div className="bg-gradient-to-br from-emerald-50 to-teal-50/50 rounded-2xl p-4 border border-emerald-200 space-y-2.5">
+                <div className="flex items-center justify-between text-xs text-slate-600">
+                  <span>Customer Service Bill</span>
+                  <span className="font-bold text-slate-900 font-mono">₹{customerAmt}</span>
+                </div>
+                <div className="flex items-center justify-between text-xs text-slate-600">
+                  <span className="flex items-center gap-1">
+                    <span>Doorbly Fee ({planName})</span>
+                    <span className="bg-emerald-100 text-emerald-800 text-[9px] font-bold px-1.5 py-0.5 rounded font-mono">
+                      {commRate}%
+                    </span>
+                  </span>
+                  <span className="font-semibold text-rose-600 font-mono">-₹{commAmt}</span>
+                </div>
+                <div className="border-t border-emerald-200/80 pt-2 flex items-center justify-between">
+                  <div>
+                    <span className="text-xs font-extrabold text-emerald-950 block">Net Credited to Wallet</span>
+                    <span className="text-[10px] text-emerald-700">Immediate available balance</span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-xl font-black text-emerald-900 font-mono">+₹{partnerAmt}</span>
+                  </div>
+                </div>
+              </div>
 
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={() => setShowCompleteModal(false)}
-                className="flex-1 py-3 text-slate-600 font-bold text-xs rounded-xl border border-slate-200 hover:bg-slate-50"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleCompleteServiceSubmit}
-                disabled={isProcessing}
-                className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-md flex items-center justify-center gap-1.5"
-              >
-                {isProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-                <span>Confirm Complete</span>
-              </button>
+              {/* Instant Credit Guarantee Notice */}
+              <div className="p-2.5 bg-teal-50 rounded-xl border border-teal-200 flex items-center gap-2 text-[11px] text-teal-900">
+                <Wallet className="w-4 h-4 text-[#0F766E] shrink-0" />
+                <span>Instant Wallet Credit: ₹{partnerAmt} will be deposited directly to your available balance.</span>
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-slate-700 block mb-1">
+                  Optional Completion Note / Remarks
+                </label>
+                <textarea
+                  value={newNote}
+                  onChange={(e) => setNewNote(e.target.value)}
+                  placeholder="Work completed satisfactorily..."
+                  rows={2}
+                  className="w-full text-xs p-3 border border-slate-200 rounded-xl focus:border-[#0F766E] focus:outline-hidden"
+                />
+              </div>
+
+              <div className="flex items-center gap-3 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setShowCompleteModal(false)}
+                  className="flex-1 py-3 text-slate-600 font-bold text-xs rounded-xl border border-slate-200 hover:bg-slate-50 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCompleteServiceSubmit}
+                  disabled={isProcessing}
+                  className="flex-1 py-3 bg-[#0F766E] hover:bg-teal-700 active:scale-[0.99] text-white font-extrabold text-xs rounded-xl shadow-md flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                >
+                  {isProcessing ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <>
+                      <Check className="w-4 h-4 stroke-[2.5]" />
+                      <span>Credit Wallet ₹{partnerAmt}</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Add Note Modal */}
       {showNoteModal && (

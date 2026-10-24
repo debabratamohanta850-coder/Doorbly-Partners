@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { usePartner } from '../../context/PartnerContext';
 import { partnerAuthService } from '../../services/partnerAuth';
 import { supabaseService } from '../../services/supabaseClient';
@@ -10,7 +10,15 @@ import {
   Phone,
   Loader2,
   CheckCircle2,
-  Sparkles
+  Sparkles,
+  Lock,
+  Database,
+  Flame,
+  KeyRound,
+  Radar,
+  Coins,
+  Building2,
+  TrendingUp
 } from 'lucide-react';
 
 const GoogleIcon: React.FC<{ className?: string }> = ({ className = 'w-5 h-5' }) => (
@@ -34,14 +42,189 @@ const GoogleIcon: React.FC<{ className?: string }> = ({ className = 'w-5 h-5' })
   </svg>
 );
 
+interface FeatureItem {
+  id: string;
+  icon: React.ComponentType<{ className?: string }>;
+  title: string;
+  subtitle: string;
+  badge: string;
+  tagColor: string;
+  iconBg: string;
+  borderColor: string;
+}
+
+const FEATURE_ITEMS: FeatureItem[] = [
+  {
+    id: 'nearby',
+    icon: Radar,
+    title: 'Real-time nearby service matching',
+    subtitle: 'Direct GPS alerts dispatched within 5 km of you',
+    badge: 'LIVE GPS',
+    tagColor: 'bg-teal-100 text-teal-800 border-teal-200',
+    iconBg: 'bg-teal-100/90 text-[#0F766E]',
+    borderColor: 'border-teal-200/90'
+  },
+  {
+    id: 'wallet',
+    icon: Coins,
+    title: 'Instant wallet credits on job completion',
+    subtitle: 'Zero delay — earnings credit immediately to available balance',
+    badge: 'INSTANT CREDIT',
+    tagColor: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+    iconBg: 'bg-emerald-100/90 text-emerald-700',
+    borderColor: 'border-emerald-200/90'
+  },
+  {
+    id: 'payout',
+    icon: Building2,
+    title: 'Direct bank payouts & ₹370 flat plan',
+    subtitle: 'Retain 88% on Growth plan with fast direct IMPS transfers',
+    badge: '₹370 GROWTH',
+    tagColor: 'bg-cyan-100 text-cyan-800 border-cyan-200',
+    iconBg: 'bg-cyan-100/90 text-cyan-700',
+    borderColor: 'border-cyan-200/90'
+  },
+  {
+    id: 'pro',
+    icon: TrendingUp,
+    title: 'Keep up to 93% with Pro subscriptions',
+    subtitle: 'Just 7% company commission for high-earning partners',
+    badge: '7% FEE',
+    tagColor: 'bg-amber-100 text-amber-900 border-amber-200',
+    iconBg: 'bg-amber-100/90 text-amber-700',
+    borderColor: 'border-amber-200/90'
+  },
+  {
+    id: 'safety',
+    icon: ShieldCheck,
+    title: '100% verified doorstep customers & SOS',
+    subtitle: 'Safe doorstep service protocols and emergency partner hotline',
+    badge: 'SAFETY 1ST',
+    tagColor: 'bg-slate-100 text-slate-800 border-slate-200',
+    iconBg: 'bg-slate-100 text-slate-700',
+    borderColor: 'border-slate-200'
+  }
+];
+
+const PartnerFeaturesShowcase: React.FC = () => {
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [isFlashing, setIsFlashing] = useState(false);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setIsFlashing(true);
+      setTimeout(() => {
+        setCurrentIndex((prev) => (prev + 1) % FEATURE_ITEMS.length);
+        setIsFlashing(false);
+      }, 250);
+    }, 3200);
+
+    return () => clearInterval(timer);
+  }, []);
+
+  const activeItem = FEATURE_ITEMS[currentIndex];
+  const IconComponent = activeItem.icon;
+
+  return (
+    <div className="space-y-2.5">
+      {/* Dynamic Flash-Out Feature Spotlight Card */}
+      <div
+        className={`relative overflow-hidden rounded-2xl p-3.5 border transition-all duration-300 shadow-xs ${activeItem.borderColor} bg-gradient-to-r from-teal-50/90 via-white to-emerald-50/70 ${
+          isFlashing ? 'opacity-25 scale-[0.98] blur-[1px]' : 'opacity-100 scale-100 blur-0'
+        }`}
+      >
+        <div className="flex items-start gap-3">
+          <div
+            className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${activeItem.iconBg} shadow-xs ring-2 ring-white`}
+          >
+            <IconComponent className="w-5 h-5" />
+          </div>
+
+          <div className="flex-1 min-w-0 text-left">
+            <div className="flex items-center justify-between gap-1 mb-0.5">
+              <span
+                className={`text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded-md border tracking-wider ${activeItem.tagColor}`}
+              >
+                {activeItem.badge}
+              </span>
+              <span className="text-[10px] text-slate-400 font-mono">
+                {currentIndex + 1}/{FEATURE_ITEMS.length}
+              </span>
+            </div>
+            <h4 className="text-xs font-black text-slate-900 leading-snug">
+              {activeItem.title}
+            </h4>
+            <p className="text-[11px] text-slate-500 mt-0.5 line-clamp-1">
+              {activeItem.subtitle}
+            </p>
+          </div>
+        </div>
+
+        {/* Feature Navigation Dots */}
+        <div className="mt-2.5 flex items-center justify-between pt-2 border-t border-slate-100/80">
+          <div className="flex items-center gap-1">
+            {FEATURE_ITEMS.map((item, idx) => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => {
+                  setIsFlashing(true);
+                  setTimeout(() => {
+                    setCurrentIndex(idx);
+                    setIsFlashing(false);
+                  }, 150);
+                }}
+                className={`h-1.5 rounded-full transition-all cursor-pointer ${
+                  idx === currentIndex
+                    ? 'w-5 bg-[#0F766E]'
+                    : 'w-1.5 bg-slate-200 hover:bg-slate-300'
+                }`}
+                aria-label={`View feature ${idx + 1}`}
+              />
+            ))}
+          </div>
+          <span className="text-[10px] text-[#0F766E] font-bold flex items-center gap-0.5">
+            <span>Verified Partner Benefit</span>
+          </span>
+        </div>
+      </div>
+
+      {/* Smooth Continuous Scrolling Text Ticker with Feature Icons */}
+      <div className="relative overflow-hidden rounded-xl bg-slate-900 text-teal-200 py-2 border border-slate-800 shadow-inner">
+        <div className="pointer-events-none absolute left-0 top-0 bottom-0 w-6 bg-gradient-to-r from-slate-900 to-transparent z-10" />
+        <div className="pointer-events-none absolute right-0 top-0 bottom-0 w-6 bg-gradient-to-l from-slate-900 to-transparent z-10" />
+
+        <div className="animate-continuous-scroll flex items-center gap-8 text-[11px] font-semibold tracking-wide whitespace-nowrap">
+          {[...FEATURE_ITEMS, ...FEATURE_ITEMS].map((item, idx) => {
+            const ItemIcon = item.icon;
+            return (
+              <div
+                key={`${item.id}-${idx}`}
+                className="flex items-center gap-2 text-slate-200 hover:text-white transition-colors"
+              >
+                <span className="w-5 h-5 rounded-md bg-teal-950/80 border border-teal-700/60 flex items-center justify-center text-teal-300">
+                  <ItemIcon className="w-3 h-3" />
+                </span>
+                <span>{item.title}</span>
+                <span className="text-teal-500 font-bold ml-1">•</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 export const AuthScreen: React.FC = () => {
   const { refreshSession } = usePartner();
 
   const [mode, setMode] = useState<'welcome' | 'login' | 'register'>('welcome');
-  const [loginMethod, setLoginMethod] = useState<'otp' | 'email'>('otp');
+  const [loginMethod, setLoginMethod] = useState<'screen_code' | 'email' | 'otp'>('screen_code');
 
   // Login inputs
   const [phone, setPhone] = useState('+91 ');
+  const [screenCode, setScreenCode] = useState('');
   const [otp, setOtp] = useState('');
   const [otpSent, setOtpSent] = useState(false);
   const [email, setEmail] = useState('');
@@ -50,6 +233,7 @@ export const AuthScreen: React.FC = () => {
   // Register inputs
   const [regName, setRegName] = useState('');
   const [regMobile, setRegMobile] = useState('+91 ');
+  const [regScreenCode, setRegScreenCode] = useState('');
   const [regEmail, setRegEmail] = useState('');
   const [regGender, setRegGender] = useState<'male' | 'female' | 'other'>('male');
   const [regAddress] = useState('');
@@ -61,6 +245,34 @@ export const AuthScreen: React.FC = () => {
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+
+  // Handle Phone & 4-Digit Screen Lock Code Login (Direct Supabase Verification)
+  const handlePhoneScreenCodeLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!phone.trim() || phone.trim().length < 10) {
+      setErrorMsg('Please enter a valid mobile number.');
+      return;
+    }
+    if (!/^\d{4}$/.test(screenCode.trim())) {
+      setErrorMsg('Please enter your 4-digit screen lock code.');
+      return;
+    }
+
+    setIsSubmitting(true);
+    setErrorMsg('');
+    try {
+      const res = await partnerAuthService.loginWithPhoneAndScreenCode(phone, screenCode);
+      if (res.success && res.user) {
+        await refreshSession();
+      } else {
+        setErrorMsg(res.message || 'Verification failed. Screen code did not match Supabase records.');
+      }
+    } catch (err: unknown) {
+      setErrorMsg(err instanceof Error ? err.message : 'Login failed.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   // Firebase Google Auth handler
   const handleGoogleFirebaseLogin = async () => {
@@ -115,11 +327,11 @@ export const AuthScreen: React.FC = () => {
     }
   };
 
-  // Handle Email Login
+  // Handle Gmail / Email Login (Controlled directly by Firebase Authentication)
   const handleEmailLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email || !password) {
-      setErrorMsg('Please enter email and password.');
+      setErrorMsg('Please enter Gmail ID and password.');
       return;
     }
 
@@ -130,7 +342,7 @@ export const AuthScreen: React.FC = () => {
       if (res.success) {
         await refreshSession();
       } else {
-        setErrorMsg(res.message || 'Invalid credentials');
+        setErrorMsg(res.message || 'Firebase login failed. Please check your credentials.');
       }
     } finally {
       setIsSubmitting(false);
@@ -145,11 +357,17 @@ export const AuthScreen: React.FC = () => {
       return;
     }
 
+    if (!regScreenCode || !/^\d{4}$/.test(regScreenCode.trim())) {
+      setErrorMsg('Please choose a 4-digit screen lock code (e.g. 1234) to secure your account and allow online verification.');
+      return;
+    }
+
     setIsSubmitting(true);
     setErrorMsg('');
 
     try {
       const partnerId = `p_${Date.now()}`;
+      const cleanCode = regScreenCode.trim();
       const matchedCategory =
         PROFESSION_CATEGORIES.find((cat) => cat.professions.includes(regPrimaryCategory))?.name ||
         regPrimaryCategory;
@@ -172,11 +390,23 @@ export const AuthScreen: React.FC = () => {
         working_area: regCity || 'All Areas',
         preferred_radius_km: 15,
         languages: ['English', 'Hindi'],
+        screen_lock_code: cleanCode,
+        is_screen_code_verified: true,
+        screen_code_verified_at: new Date().toISOString(),
+        auth_provider: 'screen_code',
         status: 'pending_verification', // Partner must wait for Admin approval to become an active partner
         is_online: false,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       };
+
+      // Store screen credentials in Supabase
+      await supabaseService.storeScreenCredentials(
+        regMobile.trim(),
+        cleanCode,
+        partnerId,
+        regName.trim()
+      );
 
       await supabaseService.upsertPartnerProfile(partnerProfile);
 
@@ -198,7 +428,9 @@ export const AuthScreen: React.FC = () => {
         uid: partnerId,
         displayName: regName,
         phone: regMobile,
-        email: partnerProfile.email
+        email: partnerProfile.email,
+        authProvider: 'screen_code',
+        isScreenCodeVerified: true
       });
 
       await refreshSession();
@@ -240,22 +472,7 @@ export const AuthScreen: React.FC = () => {
 
           {mode === 'welcome' && (
             <div className="space-y-4 text-center py-2">
-              <div className="space-y-2">
-                <div className="bg-teal-50/80 p-3.5 rounded-2xl border border-teal-200/80 text-left text-xs space-y-1.5">
-                  <div className="flex items-center gap-2 text-teal-900 font-bold">
-                    <CheckCircle2 className="w-4 h-4 text-[#0F766E]" />
-                    <span>Real-time nearby service matching</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-teal-900 font-bold">
-                    <CheckCircle2 className="w-4 h-4 text-[#0F766E]" />
-                    <span>Instant wallet credits on job completion</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-teal-900 font-bold">
-                    <CheckCircle2 className="w-4 h-4 text-[#0F766E]" />
-                    <span>Direct bank payouts & ₹370 flat plan</span>
-                  </div>
-                </div>
-              </div>
+              <PartnerFeaturesShowcase />
 
               <div className="pt-2 space-y-2.5">
                 {/* 1-Tap Google Sign-In (Firebase Auth) */}
@@ -301,25 +518,52 @@ export const AuthScreen: React.FC = () => {
 
           {mode === 'login' && (
             <div className="space-y-4">
-              <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-                <h3 className="font-bold text-slate-900 text-base">Partner Sign In</h3>
-                <div className="flex items-center gap-1 text-xs">
+              <div className="border-b border-slate-100 pb-2">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="font-bold text-slate-900 text-base">Partner Sign In</h3>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase">Select Mode</span>
+                </div>
+                <div className="grid grid-cols-3 gap-1 bg-slate-100 p-1 rounded-xl text-xs font-bold">
                   <button
-                    onClick={() => setLoginMethod('otp')}
-                    className={`px-2 py-1 rounded-md font-semibold ${loginMethod === 'otp' ? 'bg-teal-50 text-[#0F766E]' : 'text-slate-400'}`}
+                    type="button"
+                    onClick={() => setLoginMethod('screen_code')}
+                    className={`py-1.5 px-1 rounded-lg text-[11px] transition-all flex items-center justify-center gap-1 ${
+                      loginMethod === 'screen_code'
+                        ? 'bg-white text-[#0F766E] shadow-2xs font-extrabold'
+                        : 'text-slate-500 hover:text-slate-800'
+                    }`}
                   >
-                    Phone OTP
+                    <Lock className="w-3 h-3 shrink-0" />
+                    <span>Screen PIN</span>
                   </button>
                   <button
+                    type="button"
                     onClick={() => setLoginMethod('email')}
-                    className={`px-2 py-1 rounded-md font-semibold ${loginMethod === 'email' ? 'bg-teal-50 text-[#0F766E]' : 'text-slate-400'}`}
+                    className={`py-1.5 px-1 rounded-lg text-[11px] transition-all flex items-center justify-center gap-1 ${
+                      loginMethod === 'email'
+                        ? 'bg-white text-orange-600 shadow-2xs font-extrabold'
+                        : 'text-slate-500 hover:text-slate-800'
+                    }`}
                   >
-                    Email
+                    <Flame className="w-3 h-3 shrink-0" />
+                    <span>Gmail ID</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setLoginMethod('otp')}
+                    className={`py-1.5 px-1 rounded-lg text-[11px] transition-all flex items-center justify-center gap-1 ${
+                      loginMethod === 'otp'
+                        ? 'bg-white text-[#0F766E] shadow-2xs font-extrabold'
+                        : 'text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    <Phone className="w-3 h-3 shrink-0" />
+                    <span>Phone OTP</span>
                   </button>
                 </div>
               </div>
 
-              {/* Quick Google Sign In */}
+              {/* Quick Google Sign In (Firebase) */}
               <button
                 type="button"
                 onClick={handleGoogleFirebaseLogin}
@@ -331,7 +575,7 @@ export const AuthScreen: React.FC = () => {
                 ) : (
                   <>
                     <GoogleIcon className="w-4 h-4" />
-                    <span>Quick Sign In with Google</span>
+                    <span>1-Tap Google Sign In (Firebase)</span>
                   </>
                 )}
               </button>
@@ -339,11 +583,127 @@ export const AuthScreen: React.FC = () => {
               <div className="relative py-1 flex items-center justify-center">
                 <div className="w-full border-t border-slate-100"></div>
                 <span className="absolute bg-white px-2 text-[9px] uppercase font-bold text-slate-400">
-                  OR USE {loginMethod.toUpperCase()}
+                  {loginMethod === 'screen_code'
+                    ? 'PHONE & SCREEN CODE (SUPABASE)'
+                    : loginMethod === 'email'
+                    ? 'GMAIL ID & PASSWORD (FIREBASE)'
+                    : 'PHONE OTP'}
                 </span>
               </div>
 
-              {loginMethod === 'otp' ? (
+              {loginMethod === 'screen_code' && (
+                <form onSubmit={handlePhoneScreenCodeLogin} className="space-y-3">
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 block mb-1">
+                      Registered Mobile Number
+                    </label>
+                    <div className="relative">
+                      <Phone className="w-4 h-4 absolute left-3 top-3.5 text-slate-400" />
+                      <input
+                        type="tel"
+                        value={phone}
+                        onChange={(e) => setPhone(e.target.value)}
+                        placeholder="+91 98765 43210"
+                        className="w-full text-sm pl-9 pr-3 py-3 border border-slate-300 rounded-xl focus:border-[#0F766E] focus:outline-hidden font-bold"
+                        autoFocus
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-xs font-semibold text-slate-700 block">
+                        4-Digit Screen Lock Code
+                      </label>
+                      <span className="text-[10px] text-teal-800 font-bold bg-teal-50 px-2 py-0.5 rounded border border-teal-200/60">
+                        Supabase Verified
+                      </span>
+                    </div>
+                    <div className="relative">
+                      <Lock className="w-4 h-4 absolute left-3 top-3.5 text-slate-400" />
+                      <input
+                        type="password"
+                        maxLength={4}
+                        inputMode="numeric"
+                        value={screenCode}
+                        onChange={(e) => setScreenCode(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                        placeholder="•••• (e.g. 1234)"
+                        className="w-full text-sm pl-9 pr-3 py-3 border border-slate-300 rounded-xl focus:border-[#0F766E] focus:outline-hidden font-mono tracking-widest text-base font-bold"
+                        required
+                      />
+                    </div>
+                    <p className="text-[10px] text-slate-400 mt-1">
+                      Enter the genuine 4-digit code stored in Supabase for this mobile number.
+                    </p>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={isSubmitting || screenCode.length !== 4}
+                    className="w-full py-3.5 bg-[#0F766E] hover:bg-teal-700 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-md flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    {isSubmitting ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <ShieldCheck className="w-4 h-4" />
+                    )}
+                    <span>VERIFY IN SUPABASE &amp; SIGN IN</span>
+                  </button>
+                </form>
+              )}
+
+              {loginMethod === 'email' && (
+                <form onSubmit={handleEmailLogin} className="space-y-3">
+                  <div className="p-2.5 bg-orange-50 border border-orange-200/80 rounded-xl text-[11px] text-orange-900 flex items-center gap-2">
+                    <Flame className="w-4 h-4 text-orange-600 shrink-0" />
+                    <span>Credentials controlled directly by <strong>Firebase Authentication</strong>.</span>
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 block mb-1">
+                      Gmail ID / Email
+                    </label>
+                    <input
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="partner@gmail.com"
+                      className="w-full text-xs p-3 border border-slate-300 rounded-xl focus:border-[#0F766E] focus:outline-hidden font-medium"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 block mb-1">
+                      Password
+                    </label>
+                    <input
+                      type="password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="••••••••"
+                      className="w-full text-xs p-3 border border-slate-300 rounded-xl focus:border-[#0F766E] focus:outline-hidden"
+                      required
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={isSubmitting}
+                    className="w-full py-3.5 bg-[#0F766E] hover:bg-teal-700 text-white font-bold text-xs rounded-xl shadow-md flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    {isSubmitting ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <ShieldCheck className="w-4 h-4" />
+                    )}
+                    <span>SIGN IN WITH FIREBASE</span>
+                  </button>
+                </form>
+              )}
+
+              {loginMethod === 'otp' && (
                 !otpSent ? (
                   <form onSubmit={handleSendOtp} className="space-y-3">
                     <div>
@@ -355,16 +715,8 @@ export const AuthScreen: React.FC = () => {
                         <input
                           type="text"
                           value={phone}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            if (val.includes('@') || /[a-zA-Z]/.test(val)) {
-                              setLoginMethod('email');
-                              setEmail(val.replace('+91', '').trim());
-                            } else {
-                              setPhone(val);
-                            }
-                          }}
-                          placeholder="+91 98765 43210 or Email"
+                          onChange={(e) => setPhone(e.target.value)}
+                          placeholder="+91 98765 43210"
                           className="w-full text-sm pl-9 pr-3 py-3 border border-slate-300 rounded-xl focus:border-[#0F766E] focus:outline-hidden font-bold"
                           autoFocus
                           required
@@ -402,7 +754,7 @@ export const AuthScreen: React.FC = () => {
                       className="w-full py-3.5 bg-[#0F766E] hover:bg-teal-700 text-white font-bold text-xs rounded-xl shadow-md flex items-center justify-center gap-1.5"
                     >
                       {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
-                      <span>VERIFY & GO TO DASHBOARD</span>
+                      <span>VERIFY &amp; GO TO DASHBOARD</span>
                     </button>
 
                     <button
@@ -414,40 +766,6 @@ export const AuthScreen: React.FC = () => {
                     </button>
                   </form>
                 )
-              ) : (
-                <form onSubmit={handleEmailLogin} className="space-y-3">
-                  <div>
-                    <label className="text-xs font-semibold text-slate-700 block mb-1">Email</label>
-                    <input
-                      type="email"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      placeholder="partner@doorbly.com"
-                      className="w-full text-xs p-3 border border-slate-300 rounded-xl focus:border-[#0F766E] focus:outline-hidden"
-                      required
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-xs font-semibold text-slate-700 block mb-1">Password</label>
-                    <input
-                      type="password"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      placeholder="••••••••"
-                      className="w-full text-xs p-3 border border-slate-300 rounded-xl focus:border-[#0F766E] focus:outline-hidden"
-                      required
-                    />
-                  </div>
-
-                  <button
-                    type="submit"
-                    disabled={isSubmitting}
-                    className="w-full py-3.5 bg-[#0F766E] hover:bg-teal-700 text-white font-bold text-xs rounded-xl shadow-md"
-                  >
-                    SIGN IN
-                  </button>
-                </form>
               )}
 
               <div className="pt-2 text-center">
@@ -534,13 +852,41 @@ export const AuthScreen: React.FC = () => {
                   </div>
                 </div>
 
+                {/* 4-Digit Screen Lock Code (Stored in Supabase) */}
+                <div className="bg-teal-50/70 p-3 rounded-2xl border border-teal-200/80 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="font-extrabold text-[#0F766E] text-xs flex items-center gap-1.5">
+                      <Lock className="w-3.5 h-3.5" />
+                      <span>Screen Lock 4-Digit Code *</span>
+                    </label>
+                    <span className="text-[10px] text-teal-800 bg-teal-200/60 px-2 py-0.5 rounded-md font-bold">
+                      Stored in Supabase
+                    </span>
+                  </div>
+                  <div className="relative">
+                    <input
+                      type="password"
+                      maxLength={4}
+                      inputMode="numeric"
+                      value={regScreenCode}
+                      onChange={(e) => setRegScreenCode(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                      placeholder="•••• (e.g. 1234)"
+                      className="w-full p-2.5 bg-white border border-teal-300 rounded-xl focus:border-[#0F766E] focus:outline-hidden font-mono tracking-widest text-center text-lg font-black text-slate-900"
+                      required
+                    />
+                  </div>
+                  <p className="text-[11px] text-teal-900 leading-tight">
+                    This 4-digit code is stored in Supabase. You will verify this screen lock code whenever you go Online to receive service requests.
+                  </p>
+                </div>
+
                 <div>
-                  <label className="font-semibold text-slate-700 block mb-1">Email Address</label>
+                  <label className="font-semibold text-slate-700 block mb-1">Email / Gmail Address</label>
                   <input
                     type="email"
                     value={regEmail}
                     onChange={(e) => setRegEmail(e.target.value)}
-                    placeholder="ramesh@email.com"
+                    placeholder="ramesh@gmail.com"
                     className="w-full p-2.5 border border-slate-300 rounded-xl focus:border-[#0F766E] focus:outline-hidden"
                   />
                 </div>

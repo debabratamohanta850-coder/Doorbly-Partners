@@ -3,10 +3,11 @@ import { usePartner } from '../../context/PartnerContext';
 import { supabaseService } from '../../services/supabaseClient';
 import { OfferOfTheDay } from '../../types';
 import { ActiveJobBanner } from './ActiveJobBanner';
-import { BatteryLow, Radio, CheckCircle2, Clock, Coins } from 'lucide-react';
+import { SubscriptionCards } from '../subscription/SubscriptionCards';
+import { BatteryLow, Radio, CheckCircle2, Clock, Coins, Lock, ShieldCheck, ArrowRight } from 'lucide-react';
 
 export const HomeDashboard: React.FC = () => {
-  const { partner, wallet, myJobs, activeJob, isOnline, setActiveTab, batteryState, lastJobPollTime } = usePartner();
+  const { partner, wallet, myJobs, activeJob, isOnline, toggleOnline, setActiveTab, batteryState, lastJobPollTime } = usePartner();
 
   const [worksDone, setWorksDone] = useState<number>(wallet.total_completed_jobs || 0);
   const [upcomingQueue, setUpcomingQueue] = useState<number>(0);
@@ -118,14 +119,24 @@ export const HomeDashboard: React.FC = () => {
         </div>
       ) : (
         !activeJob && (
-          <div className="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-xs text-center space-y-2">
+          <div className="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-xs text-center space-y-3">
             <div className="w-10 h-10 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center mx-auto">
               <Radio className="w-5 h-5" />
             </div>
-            <h3 className="font-normal text-slate-800 text-sm">You are currently Offline</h3>
-            <p className="text-xs text-slate-500 font-normal">
-              Switch to Online in the top bar to start receiving nearby doorstep service requests.
-            </p>
+            <div>
+              <h3 className="font-bold text-slate-800 text-sm">You are currently Offline</h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Verify your 4-digit screen lock code stored in Supabase to go Online and receive bookings.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => toggleOnline(true)}
+              className="py-2.5 px-5 rounded-xl bg-[#0F766E] hover:bg-teal-700 active:bg-teal-800 text-white font-extrabold text-xs shadow-xs inline-flex items-center gap-2 cursor-pointer transition-colors"
+            >
+              <Lock className="w-3.5 h-3.5" />
+              <span>Verify Code &amp; Go Online</span>
+            </button>
           </div>
         )
       )}
@@ -211,6 +222,32 @@ export const HomeDashboard: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Subscription Plans Section on Dashboard */}
+      <div className="space-y-3 pt-2">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="font-extrabold text-sm text-slate-900 tracking-tight flex items-center gap-1.5">
+              <ShieldCheck className="w-4 h-4 text-[#0F766E]" />
+              <span>Partner Subscription &amp; Commissions</span>
+            </h3>
+            <p className="text-[11px] text-slate-500 mt-0.5">
+              Keep up to 93% of completed service earnings on every job.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('membership')}
+            className="text-[11px] font-extrabold text-[#0F766E] hover:text-teal-800 flex items-center gap-0.5 cursor-pointer"
+          >
+            <span>Details</span>
+            <ArrowRight className="w-3 h-3" />
+          </button>
+        </div>
+
+        <SubscriptionCards layout="dashboard-carousel" onPlanActivated={fetchLiveHomeData} />
+      </div>
     </div>
   );
 };

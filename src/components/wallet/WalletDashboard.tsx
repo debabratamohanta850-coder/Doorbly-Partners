@@ -51,7 +51,7 @@ export const WalletDashboard: React.FC = () => {
       }
     };
     fetchHistory();
-  }, [partner]);
+  }, [partner, wallet.available_balance]);
 
   const handleWithdrawSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

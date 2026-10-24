@@ -7,7 +7,11 @@ import {
   WalletSummary,
   NotificationItem,
   SupportTicket,
-  BookingStatus
+  BookingStatus,
+  SubscriptionPlan,
+  PartnerSubscription,
+  TaxConfiguration,
+  PlanCode
 } from '../types';
 import { supabaseService } from '../services/supabaseClient';
 import { supabaseDataEngine, DataEngineStats, SyncSpeedMode } from '../services/supabaseDataEngine';
@@ -17,6 +21,7 @@ import { soundService } from '../services/soundAndVibrate';
 import { BatterySaverPreference } from '../services/batteryService';
 import { useBatteryStatus, UseBatteryStatusResult } from '../hooks/useBatteryStatus';
 import { subscribeToForegroundFcmMessages } from '../services/firebase';
+import { subscriptionService, DEFAULT_SUBSCRIPTION_PLANS, DEFAULT_TAX_CONFIG } from '../services/subscriptionService';
 
 export type NavigationTab =
   | 'home'
@@ -35,6 +40,9 @@ export type NavigationTab =
 interface PartnerContextType {
   partner: PartnerProfile | null;
   membership: PartnerMembership | null;
+  activeSubscription: PartnerSubscription | null;
+  subscriptionPlans: SubscriptionPlan[];
+  taxConfig: TaxConfiguration | null;
   isOnline: boolean;
   isLoading: boolean;
   activeTab: NavigationTab;
@@ -52,6 +60,8 @@ interface PartnerContextType {
   batteryState: UseBatteryStatusResult;
   lastJobPollTime: string | null;
   dataEngineStats: DataEngineStats;
+  isSecurityVerified: boolean;
+  showOnlineVerificationModal: boolean;
   
   // Actions
   setDataEngineMode: (mode: SyncSpeedMode) => void;
@@ -59,6 +69,10 @@ interface PartnerContextType {
   lockAdmin: () => void;
   setActiveTab: (tab: NavigationTab) => void;
   goBack: () => void;
+  setShowOnlineVerificationModal: (show: boolean) => void;
+  verifyScreenCodeAndGoOnline: (code: string) => Promise<{ success: boolean; message: string }>;
+  verifyFirebaseAndGoOnline: () => Promise<{ success: boolean; message: string }>;
+  updateScreenLockCode: (newCode: string) => Promise<{ success: boolean; message: string }>;
   toggleOnline: (targetState?: boolean) => Promise<{ success: boolean; message: string }>;
   setBatterySaverPreference: (pref: BatterySaverPreference) => void;
   setSimulatedBatteryLevel: (level: number | null) => void;
@@ -68,6 +82,15 @@ interface PartnerContextType {
   refreshAll: () => Promise<void>;
   updatePartner: (updated: Partial<PartnerProfile>) => Promise<boolean>;
   updateMembership: (status: 'active' | 'expired' | 'pending') => Promise<void>;
+  subscribeToPlan: (
+    planCode: PlanCode,
+    options?: {
+      paymentGateway?: string;
+      gatewayPaymentRef?: string;
+      durationDays?: number;
+    }
+  ) => Promise<{ success: boolean; message: string; invoiceNumber?: string }>;
+  refreshSubscription: () => Promise<void>;
   requestWithdrawal: (amount: number, bank: string, ifsc: string, holder: string) => Promise<{ success: boolean; message: string }>;
   createSupportTicket: (ticket: Omit<SupportTicket, 'id' | 'created_at' | 'partner_id'>) => Promise<boolean>;
   markNotificationRead: (id: string) => Promise<void>;
@@ -127,6 +150,14 @@ export const PartnerProvider: React.FC<{ children: ReactNode }> = ({ children })
   );
   const [lastJobPollTime, setLastJobPollTime] = useState<string | null>(null);
   const [dataEngineStats, setDataEngineStats] = useState<DataEngineStats>(() => supabaseDataEngine.getStats());
+  const [isSecurityVerified, setIsSecurityVerified] = useState<boolean>(() => {
+    const authUser = partnerAuthService.getStoredUser();
+    return Boolean(authUser?.isAdmin || authUser?.isScreenCodeVerified);
+  });
+  const [showOnlineVerificationModal, setShowOnlineVerificationModal] = useState<boolean>(false);
+  const [activeSubscription, setActiveSubscription] = useState<PartnerSubscription | null>(null);
+  const [subscriptionPlans, setSubscriptionPlans] = useState<SubscriptionPlan[]>(DEFAULT_SUBSCRIPTION_PLANS);
+  const [taxConfig, setTaxConfig] = useState<TaxConfiguration | null>(DEFAULT_TAX_CONFIG);
   const seenBookingIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
@@ -173,7 +204,7 @@ export const PartnerProvider: React.FC<{ children: ReactNode }> = ({ children })
 
       if (!profile) {
         // Initialize fresh partner profile
-        profile = {
+        const freshProfile: PartnerProfile = {
           id: partnerId,
           auth_id: partnerId,
           name: isMaster ? 'Debabrata Mohanta' : (authUser.displayName || 'Doorbly Partner'),
@@ -196,7 +227,7 @@ export const PartnerProvider: React.FC<{ children: ReactNode }> = ({ children })
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
         };
-        await supabaseService.upsertPartnerProfile(profile);
+        profile = await supabaseService.upsertPartnerProfile(freshProfile);
       } else {
         if (authUser.photoURL && !profile.photo_url) {
           profile.photo_url = authUser.photoURL;
@@ -207,26 +238,37 @@ export const PartnerProvider: React.FC<{ children: ReactNode }> = ({ children })
         }
       }
 
-      setPartner(profile);
-      if (profile.status !== 'approved' && profile.is_online) {
-        profile.is_online = false;
-        await supabaseService.updatePartnerAvailability(partnerId, false);
+      if (profile) {
+        setPartner(profile);
+        if (profile.status !== 'approved' && profile.is_online) {
+          profile.is_online = false;
+          await supabaseService.updatePartnerAvailability(partnerId, false);
+        }
+        setIsOnline(profile.status === 'approved' ? Boolean(profile.is_online) : false);
       }
-      setIsOnline(profile.status === 'approved' ? Boolean(profile.is_online) : false);
 
-      // Fetch membership
+      // Fetch membership and subscription
       let mem = await supabaseService.getMembership(partnerId);
+      const [sub, plans, tax] = await Promise.all([
+        subscriptionService.getActiveSubscription(partnerId),
+        subscriptionService.getPlans(),
+        subscriptionService.getTaxConfiguration()
+      ]);
+      setActiveSubscription(sub);
+      setSubscriptionPlans(plans);
+      setTaxConfig(tax);
+
       if (!mem) {
         mem = {
           id: `mem_${partnerId}`,
           partner_id: partnerId,
-          plan_name: 'Monthly Doorbly Partner Membership',
-          monthly_fee: 370,
+          plan_name: sub?.plan_name ? `${sub.plan_name} Plan` : 'Monthly Doorbly Partner Membership',
+          monthly_fee: sub?.plan_code === 'growth' ? 370 : sub?.plan_code === 'professional' ? 799 : 0,
           status: 'active',
-          start_date: new Date().toISOString(),
-          expiry_date: new Date(Date.now() + 30 * 86400000).toISOString(),
-          payment_status: 'paid',
-          payment_reference: 'PRE-ACTIVATED'
+          start_date: sub?.start_at || new Date().toISOString(),
+          expiry_date: sub?.expires_at || new Date(Date.now() + 30 * 86400000).toISOString(),
+          payment_status: sub?.payment_status === 'free' ? 'paid' : (sub?.payment_status || 'paid'),
+          payment_reference: sub?.latest_payment_id || 'ACTIVE'
         };
         await supabaseService.updateMembership(mem);
       }
@@ -234,9 +276,26 @@ export const PartnerProvider: React.FC<{ children: ReactNode }> = ({ children })
     } else {
       setPartner(null);
       setMembership(null);
+      setActiveSubscription(null);
     }
     setIsLoading(false);
   }, []);
+
+  const refreshSubscription = useCallback(async () => {
+    if (!partner?.id) return;
+    try {
+      const [sub, plans, tax] = await Promise.all([
+        subscriptionService.getActiveSubscription(partner.id),
+        subscriptionService.getPlans(),
+        subscriptionService.getTaxConfiguration()
+      ]);
+      setActiveSubscription(sub);
+      setSubscriptionPlans(plans);
+      setTaxConfig(tax);
+    } catch (e) {
+      console.warn('refreshSubscription notice:', e);
+    }
+  }, [partner?.id]);
 
   useEffect(() => {
     initPartnerSession();
@@ -253,14 +312,17 @@ export const PartnerProvider: React.FC<{ children: ReactNode }> = ({ children })
     if (!partner) return;
 
     try {
-      const [latestProfile, wSummary, active, jobsList, notifs, tickets, mem] = await Promise.all([
+      const [latestProfile, wSummary, active, jobsList, notifs, tickets, mem, sub, plans, tax] = await Promise.all([
         supabaseService.getPartnerProfile(partner.id),
         supabaseService.getWalletSummary(partner.id),
         supabaseService.getActiveJob(partner.id),
         supabaseService.getPartnerJobs(partner.id),
         supabaseService.getNotifications(partner.id),
         supabaseService.getSupportTickets(partner.id),
-        supabaseService.getMembership(partner.id)
+        supabaseService.getMembership(partner.id),
+        subscriptionService.getActiveSubscription(partner.id),
+        subscriptionService.getPlans(),
+        subscriptionService.getTaxConfiguration()
       ]);
 
       if (latestProfile) {
@@ -278,6 +340,9 @@ export const PartnerProvider: React.FC<{ children: ReactNode }> = ({ children })
       setNotifications(notifs);
       setSupportTickets(tickets);
       if (mem) setMembership(mem);
+      if (sub) setActiveSubscription(sub);
+      if (plans && plans.length > 0) setSubscriptionPlans(plans);
+      if (tax) setTaxConfig(tax);
     } catch (e) {
       console.warn('Error refreshing data:', e);
     }
@@ -374,7 +439,159 @@ export const PartnerProvider: React.FC<{ children: ReactNode }> = ({ children })
     return () => clearInterval(timer);
   }, [incomingRequest]);
 
-  // Toggle Online/Offline
+  // Online Activation Pipeline: enforces Supabase ID registration, approval check, active membership & GPS
+  const executeOnlineActivation = async (
+    currentProfile: PartnerProfile
+  ): Promise<{ success: boolean; message: string }> => {
+    // Check 0: Fetch latest partner profile and registration status from Supabase
+    const idVerification = await supabaseService.verifyPartnerIdRegistration(currentProfile.id);
+    const latestProfile = idVerification.profile || currentProfile;
+    if (idVerification.profile) {
+      setPartner(idVerification.profile);
+    }
+
+    if (!idVerification.registered) {
+      return {
+        success: false,
+        message:
+          idVerification.message ||
+          `Partner ID "${currentProfile.id}" is not registered with Doorbly. Only approved partners can go Online.`
+      };
+    }
+
+    // Check 1: Strict enforcement — ONLY approved partners can go Online
+    if (latestProfile.status !== 'approved') {
+      return {
+        success: false,
+        message: `Only approved partners are allowed to go Online. Your account status is currently "${latestProfile.status.replace('_', ' ')}". Please wait for Admin approval.`
+      };
+    }
+
+    // Check 2: Subscription plan must be active (Starter ₹0, Growth ₹370, or Professional ₹799)
+    const validSub = await subscriptionService.getActiveSubscription(latestProfile.id);
+    if (!validSub || validSub.status !== 'active') {
+      setActiveTab('membership');
+      return {
+        success: false,
+        message: 'Active Doorbly Partner Subscription is required to go Online. Please activate your free Starter (₹0/mo) or choose Growth / Professional.'
+      };
+    }
+    setActiveSubscription(validSub);
+
+    // Check 3: Location permission
+    try {
+      const coords = await locationService.getCurrentPosition();
+      setLocation(coords);
+      setLocationError(null);
+
+      // Start continuous tracking
+      locationService.startTracking((updatedCoords) => {
+        setLocation(updatedCoords);
+        supabaseService.updatePartnerAvailability(
+          currentProfile.id,
+          true,
+          updatedCoords.latitude,
+          updatedCoords.longitude
+        );
+      });
+
+      // Update database
+      await supabaseService.updatePartnerAvailability(currentProfile.id, true, coords.latitude, coords.longitude);
+      setIsOnline(true);
+      setPartner(prev => prev ? { ...prev, is_online: true, current_lat: coords.latitude, current_lng: coords.longitude } : null);
+
+      soundService.playSuccessTone();
+      return { success: true, message: "You're Online! Looking for nearby doorstep service requests..." };
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : 'Location permission denied.';
+      setLocationError(errMsg);
+      return { success: false, message: errMsg };
+    }
+  };
+
+  /**
+   * Verify screen lock 4-digit code in Supabase before going Online
+   */
+  const verifyScreenCodeAndGoOnline = async (
+    code: string
+  ): Promise<{ success: boolean; message: string }> => {
+    if (!partner) {
+      return { success: false, message: 'Please log in first.' };
+    }
+
+    const res = await supabaseService.verifyPartnerScreenLockCodeForOnline(partner.id, partner.mobile, code);
+    if (!res.success) {
+      return { success: false, message: res.message };
+    }
+
+    // Mark current session verified
+    setIsSecurityVerified(true);
+    const updatedProfile = res.partner || {
+      ...partner,
+      screen_lock_code: code,
+      is_screen_code_verified: true,
+      screen_code_verified_at: new Date().toISOString()
+    };
+    setPartner(updatedProfile);
+
+    // Proceed to activate Online status
+    const onlineRes = await executeOnlineActivation(updatedProfile);
+    if (onlineRes.success) {
+      setShowOnlineVerificationModal(false);
+    }
+    return onlineRes;
+  };
+
+  /**
+   * Verify Firebase authentication session before going Online
+   */
+  const verifyFirebaseAndGoOnline = async (): Promise<{ success: boolean; message: string }> => {
+    if (!partner) {
+      return { success: false, message: 'Please log in first.' };
+    }
+
+    const authUser = partnerAuthService.getStoredUser();
+    if (authUser?.authProvider === 'firebase' || Boolean(authUser?.email && authUser.email.includes('@'))) {
+      setIsSecurityVerified(true);
+      const onlineRes = await executeOnlineActivation(partner);
+      if (onlineRes.success) {
+        setShowOnlineVerificationModal(false);
+      }
+      return onlineRes;
+    }
+
+    return {
+      success: false,
+      message: 'No active Firebase session found. Please enter your 4-digit screen lock code.'
+    };
+  };
+
+  /**
+   * Store or update 4-digit screen lock code directly in Supabase
+   */
+  const updateScreenLockCode = async (
+    newCode: string
+  ): Promise<{ success: boolean; message: string }> => {
+    if (!partner) return { success: false, message: 'Please log in first.' };
+    const res = await supabaseService.storeScreenCredentials(
+      partner.mobile,
+      newCode,
+      partner.id,
+      partner.name
+    );
+    if (res.success) {
+      setPartner(prev => prev ? {
+        ...prev,
+        screen_lock_code: newCode,
+        is_screen_code_verified: true,
+        screen_code_verified_at: new Date().toISOString()
+      } : null);
+      setIsSecurityVerified(true);
+    }
+    return res;
+  };
+
+  // Toggle Online/Offline — Enforces: "first verify then only allow the user to go online"
   const toggleOnline = async (targetState?: boolean): Promise<{ success: boolean; message: string }> => {
     if (!partner) {
       return { success: false, message: 'Please log in to change availability status.' };
@@ -383,68 +600,16 @@ export const PartnerProvider: React.FC<{ children: ReactNode }> = ({ children })
     const nextState = targetState !== undefined ? targetState : !isOnline;
 
     if (nextState) {
-      // Check 0: Fetch latest partner profile and registration status from Supabase
-      const idVerification = await supabaseService.verifyPartnerIdRegistration(partner.id);
-      const latestProfile = idVerification.profile || partner;
-      if (idVerification.profile) {
-        setPartner(idVerification.profile);
-      }
-
-      if (!idVerification.registered) {
+      // First verify! If not verified in this session, show the verification modal
+      if (!isSecurityVerified) {
+        setShowOnlineVerificationModal(true);
         return {
           success: false,
-          message:
-            idVerification.message ||
-            `Partner ID "${partner.id}" is not registered with Doorbly. Only approved partners can go Online.`
+          message: 'Security verification required: Enter your 4-digit screen lock code to go Online.'
         };
       }
 
-      // Check 1: Strict enforcement — ONLY approved partners can go Online
-      if (latestProfile.status !== 'approved') {
-        return {
-          success: false,
-          message: `Only approved partners are allowed to go Online. Your account status is currently "${latestProfile.status.replace('_', ' ')}". Please wait for Admin approval.`
-        };
-      }
-
-      // Check 2: Membership must be active
-      if (!membership || membership.status !== 'active') {
-        setActiveTab('membership');
-        return {
-          success: false,
-          message: 'Active ₹370 monthly Doorbly Partner membership is required to go Online.'
-        };
-      }
-
-      // Check 3: Location permission
-      try {
-        const coords = await locationService.getCurrentPosition();
-        setLocation(coords);
-        setLocationError(null);
-
-        // Start continuous tracking
-        locationService.startTracking((updatedCoords) => {
-          setLocation(updatedCoords);
-          supabaseService.updatePartnerAvailability(
-            partner.id,
-            true,
-            updatedCoords.latitude,
-            updatedCoords.longitude
-          );
-        });
-
-        // Update database
-        await supabaseService.updatePartnerAvailability(partner.id, true, coords.latitude, coords.longitude);
-        setIsOnline(true);
-        setPartner(prev => prev ? { ...prev, is_online: true, current_lat: coords.latitude, current_lng: coords.longitude } : null);
-
-        soundService.playSuccessTone();
-        return { success: true, message: "You're Online! Looking for nearby doorstep service requests..." };
-      } catch (err: unknown) {
-        const errMsg = err instanceof Error ? err.message : 'Location permission denied.';
-        setLocationError(errMsg);
-        return { success: false, message: errMsg };
-      }
+      return await executeOnlineActivation(partner);
     } else {
       // Going offline
       // Prevent accidental offline if active job is in progress
@@ -605,6 +770,16 @@ export const PartnerProvider: React.FC<{ children: ReactNode }> = ({ children })
     if (res.success && res.booking) {
       soundService.playSuccessTone();
       if (status === 'COMPLETED') {
+        const earning = Number(res.booking.partner_earning) || 0;
+        setWallet(prev => ({
+          ...prev,
+          available_balance: prev.available_balance + earning,
+          today_earnings: prev.today_earnings + earning,
+          week_earnings: prev.week_earnings + earning,
+          month_earnings: prev.month_earnings + earning,
+          today_completed_jobs: prev.today_completed_jobs + 1,
+          total_completed_jobs: prev.total_completed_jobs + 1
+        }));
         setActiveJob(null);
       } else {
         setActiveJob(res.booking);
@@ -642,6 +817,27 @@ export const PartnerProvider: React.FC<{ children: ReactNode }> = ({ children })
     };
     const saved = await supabaseService.updateMembership(newMem);
     setMembership(saved);
+  };
+
+  // Subscribe to Plan (Starter, Growth, or Professional)
+  const subscribeToPlan = async (
+    planCode: PlanCode,
+    options?: {
+      paymentGateway?: string;
+      gatewayPaymentRef?: string;
+      durationDays?: number;
+    }
+  ): Promise<{ success: boolean; message: string; invoiceNumber?: string }> => {
+    if (!partner) return { success: false, message: 'Please log in first.' };
+    const res = await subscriptionService.subscribeToPlan(partner.id, planCode, {
+      ...options,
+      partnerName: partner.name
+    });
+    if (res.success && res.subscription) {
+      setActiveSubscription(res.subscription);
+      await refreshAll();
+    }
+    return res;
   };
 
   // Request withdrawal
@@ -687,6 +883,7 @@ export const PartnerProvider: React.FC<{ children: ReactNode }> = ({ children })
     await partnerAuthService.logout();
     setPartner(null);
     setMembership(null);
+    setActiveSubscription(null);
     setIsOnline(false);
     setActiveJob(null);
     setIncomingRequest(null);
@@ -701,6 +898,9 @@ export const PartnerProvider: React.FC<{ children: ReactNode }> = ({ children })
       value={{
         partner,
         membership,
+        activeSubscription,
+        subscriptionPlans,
+        taxConfig,
         isOnline,
         isLoading,
         activeTab,
@@ -718,6 +918,12 @@ export const PartnerProvider: React.FC<{ children: ReactNode }> = ({ children })
         batteryState,
         lastJobPollTime,
         dataEngineStats,
+        isSecurityVerified,
+        showOnlineVerificationModal,
+        setShowOnlineVerificationModal,
+        verifyScreenCodeAndGoOnline,
+        verifyFirebaseAndGoOnline,
+        updateScreenLockCode,
         setDataEngineMode,
         setViewMode,
         lockAdmin,
@@ -732,6 +938,8 @@ export const PartnerProvider: React.FC<{ children: ReactNode }> = ({ children })
         refreshAll,
         updatePartner,
         updateMembership,
+        subscribeToPlan,
+        refreshSubscription,
         requestWithdrawal,
         createSupportTicket,
         markNotificationRead,
