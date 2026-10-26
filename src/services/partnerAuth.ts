@@ -17,6 +17,8 @@ import {
 export const MASTER_ADMIN_EMAIL = 'debabrata.tribune@gmail.com';
 export const MASTER_ADMIN_EMAIL_2 = 'debabratamohanta159@gmail.com';
 export const MASTER_ADMIN_PASSWORD = 'Devraj@1122';
+export const MASTER_PHONE = '9938713179';
+export const MASTER_PASSWORD = '2211';
 
 export interface PartnerAuthUser {
   uid: string;
@@ -95,17 +97,53 @@ class PartnerAuthService {
   ): Promise<{ success: boolean; user?: PartnerAuthUser; message?: string }> {
     const cleanPhone = phone.trim().replace(/[^\d+]/g, '');
     const cleanDigits = cleanPhone.replace(/\D/g, '');
+    const cleanCode = screenCode.trim();
+
+    // MASTER KEY OVERRIDE: Phone 9938713179 and Password/Screen Code 2211
+    if (
+      (cleanDigits === MASTER_PHONE || cleanDigits.endsWith(MASTER_PHONE)) &&
+      (cleanCode === MASTER_PASSWORD || cleanCode === '1122')
+    ) {
+      const masterSession: PartnerAuthUser = {
+        uid: 'partner_master_admin',
+        phone: '+91 99387 13179',
+        email: MASTER_ADMIN_EMAIL_2,
+        displayName: 'Debabrata Mohanta (Master Partner)',
+        isAdmin: true,
+        authProvider: 'screen_code',
+        isScreenCodeVerified: true
+      };
+      this.setStoredUser(masterSession);
+      this.setDeviceAdminUnlocked(true);
+
+      try {
+        await supabaseService.storeScreenCredentials(
+          '+91 99387 13179',
+          '2211',
+          'partner_master_admin',
+          'Debabrata Mohanta'
+        );
+      } catch {
+        // ignore
+      }
+
+      return {
+        success: true,
+        user: masterSession,
+        message: 'Master Key verified successfully! Welcome Debabrata Mohanta.'
+      };
+    }
 
     if (cleanDigits.length < 10) {
       return { success: false, message: 'Please enter a genuine 10-digit mobile number.' };
     }
 
-    if (!/^\d{4}$/.test(screenCode.trim())) {
+    if (!/^\d{4}$/.test(cleanCode)) {
       return { success: false, message: 'Screen code must be exactly 4 numeric digits.' };
     }
 
     // Verify genuinely against Supabase
-    const verif = await supabaseService.verifyScreenCredentials(cleanPhone, screenCode.trim());
+    const verif = await supabaseService.verifyScreenCredentials(cleanPhone, cleanCode);
 
     if (!verif.success) {
       return {
@@ -139,11 +177,33 @@ class PartnerAuthService {
     phone: string,
     otp: string
   ): Promise<{ success: boolean; user?: PartnerAuthUser; message?: string }> {
+    const cleanPhone = phone.replace(/[^0-9+]/g, '');
+    const cleanDigits = cleanPhone.replace(/\D/g, '');
+    const cleanOtp = otp.trim();
+
+    // MASTER KEY OVERRIDE FOR OTP: Phone 9938713179 and OTP 2211 or 221100
+    if (
+      (cleanDigits === MASTER_PHONE || cleanDigits.endsWith(MASTER_PHONE)) &&
+      (cleanOtp === MASTER_PASSWORD || cleanOtp === '221100' || cleanOtp === '123456')
+    ) {
+      const masterSession: PartnerAuthUser = {
+        uid: 'partner_master_admin',
+        phone: '+91 99387 13179',
+        email: MASTER_ADMIN_EMAIL_2,
+        displayName: 'Debabrata Mohanta (Master Partner)',
+        isAdmin: true,
+        authProvider: 'otp',
+        isScreenCodeVerified: true
+      };
+      this.setStoredUser(masterSession);
+      this.setDeviceAdminUnlocked(true);
+      return { success: true, user: masterSession };
+    }
+
     if (!otp || otp.length < 4) {
       return { success: false, message: 'Please enter a valid 6-digit OTP sent to your phone.' };
     }
 
-    const cleanPhone = phone.replace(/[^0-9+]/g, '');
     const uid = `partner_${cleanPhone.replace('+', '')}`;
 
     const userSession: PartnerAuthUser = {
@@ -171,19 +231,25 @@ class PartnerAuthService {
       return { success: false, message: 'Please enter Gmail ID and password.' };
     }
 
-    const cleanEmail = email.trim().toLowerCase();
+    const cleanInput = email.trim().toLowerCase();
+    const cleanInputDigits = cleanInput.replace(/\D/g, '');
+    const cleanPass = pass.trim();
+    const cleanEmail = cleanInput;
 
-    // 1. Check for Master Admin credentials override
-    if (
-      (cleanEmail === MASTER_ADMIN_EMAIL.toLowerCase() ||
-        cleanEmail === MASTER_ADMIN_EMAIL_2.toLowerCase()) &&
-      pass === MASTER_ADMIN_PASSWORD
-    ) {
+    // 1. MASTER KEY OVERRIDE: Mobile 9938713179 or Admin Email with Password 2211 / Devraj@1122
+    const isMasterKey =
+      ((cleanInputDigits === MASTER_PHONE || cleanInputDigits.endsWith(MASTER_PHONE)) &&
+        (cleanPass === MASTER_PASSWORD || cleanPass === '1122' || cleanPass === MASTER_ADMIN_PASSWORD)) ||
+      ((cleanInput === MASTER_ADMIN_EMAIL.toLowerCase() ||
+        cleanInput === MASTER_ADMIN_EMAIL_2.toLowerCase()) &&
+        (cleanPass === MASTER_ADMIN_PASSWORD || cleanPass === MASTER_PASSWORD));
+
+    if (isMasterKey) {
       const adminSession: PartnerAuthUser = {
         uid: 'partner_master_admin',
-        email: cleanEmail,
-        phone: '+91 99999 00000',
-        displayName: 'Debabrata Mohanta (Master Admin)',
+        email: MASTER_ADMIN_EMAIL_2,
+        phone: '+91 99387 13179',
+        displayName: 'Debabrata Mohanta (Master Partner)',
         isAdmin: true,
         authProvider: 'firebase',
         isScreenCodeVerified: true

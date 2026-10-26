@@ -30,7 +30,7 @@ export const PWAInstallBanner: React.FC = () => {
               Install Doorbly Partner App
             </div>
             <div className="text-[10px] text-teal-300 truncate">
-              Fast access, instant job alerts & home screen icon
+              Easy Joining, Fast Access and instant job Allert
             </div>
           </div>
         </div>
@@ -38,9 +38,9 @@ export const PWAInstallBanner: React.FC = () => {
         <div className="flex items-center gap-1.5 shrink-0">
           <button
             onClick={handleInstallClick}
-            className="px-3 py-1.5 rounded-xl bg-[#0F766E] hover:bg-teal-600 text-white font-extrabold text-xs flex items-center gap-1.5 shadow-xs cursor-pointer"
+            className="px-2.5 py-1 rounded-lg bg-[#0F766E] hover:bg-teal-600 text-white font-bold text-[11px] flex items-center gap-1 shadow-xs cursor-pointer"
           >
-            <Download className="w-3.5 h-3.5" />
+            <Download className="w-3 h-3" />
             <span>Install</span>
           </button>
           <button

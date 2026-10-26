@@ -221,15 +221,13 @@ export const ServiceSelectionView: React.FC = () => {
             <span>Add the Profession</span>
           </button>
 
-          {/* Scrolling Marquee on the Right Side of Add the Profession */}
-          <div className="flex-1 overflow-hidden bg-white/90 border border-sky-200/80 rounded-xl py-1.5 px-2">
-            <div className="animate-marquee text-xs text-[#0F766E]">
-              Add a New Profession at Just ₹49 &amp; Unlock More Ways to Earn!
-            </div>
+          {/* Static Info Badge on the Right Side of Add the Profession */}
+          <div className="flex-1 bg-teal-50/80 border border-teal-200/80 rounded-xl py-1.5 px-2.5 text-xs text-[#0F766E] font-medium truncate">
+            Add at ₹49 &amp; unlock more ways to earn
           </div>
         </div>
 
-        {/* Option 2: Replace the Profession + Right-Side Scrolling Banner */}
+        {/* Option 2: Replace the Profession + Right-Side Info Badge */}
         <div
           className={`flex items-center gap-2 p-2 rounded-2xl border transition-all ${
             actionMode === 'replace'
@@ -262,11 +260,9 @@ export const ServiceSelectionView: React.FC = () => {
             <span>Replace the Profession</span>
           </button>
 
-          {/* Scrolling Marquee on the Right Side of Replace the Profession */}
-          <div className="flex-1 overflow-hidden bg-white/90 border border-sky-200/80 rounded-xl py-1.5 px-2">
-            <div className="animate-marquee text-xs text-sky-800">
-              Free Profession Change Every 30 Days — Keep Growing, Keep Earning!
-            </div>
+          {/* Static Info Badge on the Right Side of Replace the Profession */}
+          <div className="flex-1 bg-sky-50/80 border border-sky-200/80 rounded-xl py-1.5 px-2.5 text-xs text-sky-800 font-medium truncate">
+            Free profession change every 30 days
           </div>
         </div>
       </div>

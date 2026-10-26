@@ -200,6 +200,7 @@ export const PartnerProvider: React.FC<{ children: ReactNode }> = ({ children })
         unlocked ||
         authUser.email === 'debabrata.tribune@gmail.com' ||
         authUser.email === 'debabratamohanta159@gmail.com' ||
+        authUser.phone?.includes('9938713179') ||
         authUser.uid === 'partner_master_admin';
 
       if (!profile) {
@@ -208,7 +209,7 @@ export const PartnerProvider: React.FC<{ children: ReactNode }> = ({ children })
           id: partnerId,
           auth_id: partnerId,
           name: isMaster ? 'Debabrata Mohanta' : (authUser.displayName || 'Doorbly Partner'),
-          mobile: isMaster ? '+91 99999 00000' : (authUser.phone || '+91 98765 43210'),
+          mobile: isMaster ? (authUser.phone || '+91 99387 13179') : (authUser.phone || '+91 98765 43210'),
           email: authUser.email || 'partner@doorbly.com',
           photo_url: authUser.photoURL || undefined,
           address: isMaster ? 'Executive Operations Command' : 'Service Sector 1',

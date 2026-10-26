@@ -35,39 +35,27 @@
   padding-top: max(0.75rem, env(safe-area-inset-top));
 }
 
-@keyframes marquee-scroll {
+@keyframes flip-360 {
   0% {
-    transform: translateX(100%);
+    transform: perspective(700px) rotateY(0deg) scale(0.75);
+    opacity: 0;
+  }
+  50% {
+    transform: perspective(700px) rotateY(180deg) scale(1.08);
+    opacity: 0.85;
   }
   100% {
-    transform: translateX(-100%);
+    transform: perspective(700px) rotateY(360deg) scale(1);
+    opacity: 1;
   }
 }
 
-.animate-marquee {
-  display: inline-block;
-  white-space: nowrap;
-  animation: marquee-scroll 11s linear infinite;
+.animate-flip-360 {
+  animation: flip-360 1s cubic-bezier(0.22, 1, 0.36, 1) both;
+  transform-style: preserve-3d;
+  will-change: transform, opacity;
 }
 
-@keyframes continuous-scroll {
-  0% {
-    transform: translateX(0%);
-  }
-  100% {
-    transform: translateX(-50%);
-  }
-}
-
-.animate-continuous-scroll {
-  display: flex;
-  width: max-content;
-  animation: continuous-scroll 18s linear infinite;
-}
-
-.animate-continuous-scroll:hover {
-  animation-play-state: paused;
-}
 
 @keyframes flash-out-pulse {
   0% {
@@ -95,4 +83,5 @@
 .animate-flash-feature {
   animation: flash-out-pulse 3.2s cubic-bezier(0.16, 1, 0.3, 1) infinite;
 }
+
 

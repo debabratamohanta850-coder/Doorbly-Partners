@@ -188,30 +188,6 @@ const PartnerFeaturesShowcase: React.FC = () => {
           </span>
         </div>
       </div>
-
-      {/* Smooth Continuous Scrolling Text Ticker with Feature Icons */}
-      <div className="relative overflow-hidden rounded-xl bg-slate-900 text-teal-200 py-2 border border-slate-800 shadow-inner">
-        <div className="pointer-events-none absolute left-0 top-0 bottom-0 w-6 bg-gradient-to-r from-slate-900 to-transparent z-10" />
-        <div className="pointer-events-none absolute right-0 top-0 bottom-0 w-6 bg-gradient-to-l from-slate-900 to-transparent z-10" />
-
-        <div className="animate-continuous-scroll flex items-center gap-8 text-[11px] font-semibold tracking-wide whitespace-nowrap">
-          {[...FEATURE_ITEMS, ...FEATURE_ITEMS].map((item, idx) => {
-            const ItemIcon = item.icon;
-            return (
-              <div
-                key={`${item.id}-${idx}`}
-                className="flex items-center gap-2 text-slate-200 hover:text-white transition-colors"
-              >
-                <span className="w-5 h-5 rounded-md bg-teal-950/80 border border-teal-700/60 flex items-center justify-center text-teal-300">
-                  <ItemIcon className="w-3 h-3" />
-                </span>
-                <span>{item.title}</span>
-                <span className="text-teal-500 font-bold ml-1">•</span>
-              </div>
-            );
-          })}
-        </div>
-      </div>
     </div>
   );
 };
@@ -480,13 +456,13 @@ export const AuthScreen: React.FC = () => {
                   type="button"
                   onClick={handleGoogleFirebaseLogin}
                   disabled={isSubmitting}
-                  className="w-full py-3.5 px-6 bg-white hover:bg-slate-50 active:scale-[0.99] text-slate-800 font-extrabold text-sm rounded-2xl shadow-sm border border-slate-200 flex items-center justify-center gap-3 transition-all cursor-pointer"
+                  className="w-full py-2.5 px-4 bg-white hover:bg-slate-50 active:scale-[0.99] text-slate-800 font-bold text-xs rounded-xl shadow-xs border border-slate-200 flex items-center justify-center gap-2.5 transition-all cursor-pointer"
                 >
                   {isSubmitting ? (
-                    <Loader2 className="w-5 h-5 animate-spin text-[#0F766E]" />
+                    <Loader2 className="w-4 h-4 animate-spin text-[#0F766E]" />
                   ) : (
                     <>
-                      <GoogleIcon className="w-5 h-5" />
+                      <GoogleIcon className="w-4 h-4" />
                       <span>CONTINUE WITH GOOGLE</span>
                     </>
                   )}
@@ -494,21 +470,21 @@ export const AuthScreen: React.FC = () => {
 
                 <div className="relative py-1 flex items-center justify-center">
                   <div className="w-full border-t border-slate-200"></div>
-                  <span className="absolute bg-white px-3 text-[10px] uppercase font-bold text-slate-400">
+                  <span className="absolute bg-white px-2.5 text-[9px] uppercase font-bold text-slate-400">
                     OR CREDENTIALS
                   </span>
                 </div>
 
                 <button
                   onClick={() => setMode('login')}
-                  className="w-full py-3 px-6 bg-[#0F766E] hover:bg-teal-700 active:bg-teal-800 text-white font-extrabold text-sm rounded-2xl shadow-md transition-all cursor-pointer"
+                  className="w-full py-2.5 px-4 bg-[#0F766E] hover:bg-teal-700 active:bg-teal-800 text-white font-bold text-xs rounded-xl shadow-xs transition-all cursor-pointer"
                 >
                   LOGIN TO PARTNER ACCOUNT
                 </button>
 
                 <button
                   onClick={() => setMode('register')}
-                  className="w-full py-3 px-6 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-sm rounded-2xl border border-slate-300 transition-all cursor-pointer"
+                  className="w-full py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold text-xs rounded-xl border border-slate-300 transition-all cursor-pointer"
                 >
                   REGISTER AS NEW PARTNER
                 </button>
@@ -568,13 +544,13 @@ export const AuthScreen: React.FC = () => {
                 type="button"
                 onClick={handleGoogleFirebaseLogin}
                 disabled={isSubmitting}
-                className="w-full py-2.5 px-4 bg-slate-50 hover:bg-slate-100 text-slate-700 font-bold text-xs rounded-xl border border-slate-200 flex items-center justify-center gap-2.5 transition-all cursor-pointer"
+                className="w-full py-2 px-3 bg-slate-50 hover:bg-slate-100 text-slate-700 font-semibold text-[11px] rounded-lg border border-slate-200 flex items-center justify-center gap-2 transition-all cursor-pointer"
               >
                 {isSubmitting ? (
-                  <Loader2 className="w-4 h-4 animate-spin text-[#0F766E]" />
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-[#0F766E]" />
                 ) : (
                   <>
-                    <GoogleIcon className="w-4 h-4" />
+                    <GoogleIcon className="w-3.5 h-3.5" />
                     <span>1-Tap Google Sign In (Firebase)</span>
                   </>
                 )}
@@ -603,7 +579,7 @@ export const AuthScreen: React.FC = () => {
                         type="tel"
                         value={phone}
                         onChange={(e) => setPhone(e.target.value)}
-                        placeholder="+91 98765 43210"
+                        placeholder="+91 99387 13179"
                         className="w-full text-sm pl-9 pr-3 py-3 border border-slate-300 rounded-xl focus:border-[#0F766E] focus:outline-hidden font-bold"
                         autoFocus
                         required
@@ -628,25 +604,35 @@ export const AuthScreen: React.FC = () => {
                         inputMode="numeric"
                         value={screenCode}
                         onChange={(e) => setScreenCode(e.target.value.replace(/\D/g, '').slice(0, 4))}
-                        placeholder="•••• (e.g. 1234)"
+                        placeholder="•••• (e.g. 2211)"
                         className="w-full text-sm pl-9 pr-3 py-3 border border-slate-300 rounded-xl focus:border-[#0F766E] focus:outline-hidden font-mono tracking-widest text-base font-bold"
                         required
                       />
                     </div>
-                    <p className="text-[10px] text-slate-400 mt-1">
-                      Enter the genuine 4-digit code stored in Supabase for this mobile number.
-                    </p>
+                    <div className="flex items-center justify-between mt-1 text-[10px] text-slate-500">
+                      <span>Master Key: <strong>9938713179</strong> / <strong>2211</strong></span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPhone('9938713179');
+                          setScreenCode('2211');
+                        }}
+                        className="font-bold text-[#0F766E] hover:underline cursor-pointer"
+                      >
+                        Autofill Master Key
+                      </button>
+                    </div>
                   </div>
 
                   <button
                     type="submit"
                     disabled={isSubmitting || screenCode.length !== 4}
-                    className="w-full py-3.5 bg-[#0F766E] hover:bg-teal-700 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-md flex items-center justify-center gap-1.5 cursor-pointer"
+                    className="w-full py-2.5 px-3 bg-[#0F766E] hover:bg-teal-700 disabled:opacity-50 text-white font-bold text-[11px] rounded-lg shadow-xs flex items-center justify-center gap-1.5 cursor-pointer"
                   >
                     {isSubmitting ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
                     ) : (
-                      <ShieldCheck className="w-4 h-4" />
+                      <ShieldCheck className="w-3.5 h-3.5" />
                     )}
                     <span>VERIFY IN SUPABASE &amp; SIGN IN</span>
                   </button>
@@ -662,13 +648,13 @@ export const AuthScreen: React.FC = () => {
 
                   <div>
                     <label className="text-xs font-semibold text-slate-700 block mb-1">
-                      Gmail ID / Email
+                      Gmail ID / Mobile Number
                     </label>
                     <input
-                      type="email"
+                      type="text"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
-                      placeholder="partner@gmail.com"
+                      placeholder="partner@gmail.com or 9938713179"
                       className="w-full text-xs p-3 border border-slate-300 rounded-xl focus:border-[#0F766E] focus:outline-hidden font-medium"
                       required
                     />
@@ -691,12 +677,12 @@ export const AuthScreen: React.FC = () => {
                   <button
                     type="submit"
                     disabled={isSubmitting}
-                    className="w-full py-3.5 bg-[#0F766E] hover:bg-teal-700 text-white font-bold text-xs rounded-xl shadow-md flex items-center justify-center gap-1.5 cursor-pointer"
+                    className="w-full py-2.5 px-3 bg-[#0F766E] hover:bg-teal-700 text-white font-bold text-[11px] rounded-lg shadow-xs flex items-center justify-center gap-1.5 cursor-pointer"
                   >
                     {isSubmitting ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
                     ) : (
-                      <ShieldCheck className="w-4 h-4" />
+                      <ShieldCheck className="w-3.5 h-3.5" />
                     )}
                     <span>SIGN IN WITH FIREBASE</span>
                   </button>
@@ -726,7 +712,7 @@ export const AuthScreen: React.FC = () => {
 
                     <button
                       type="submit"
-                      className="w-full py-3.5 bg-[#0F766E] hover:bg-teal-700 text-white font-bold text-xs rounded-xl shadow-md"
+                      className="w-full py-2.5 px-3 bg-[#0F766E] hover:bg-teal-700 text-white font-bold text-[11px] rounded-lg shadow-xs cursor-pointer"
                     >
                       SEND VERIFICATION OTP
                     </button>
@@ -751,9 +737,9 @@ export const AuthScreen: React.FC = () => {
                     <button
                       type="submit"
                       disabled={isSubmitting}
-                      className="w-full py-3.5 bg-[#0F766E] hover:bg-teal-700 text-white font-bold text-xs rounded-xl shadow-md flex items-center justify-center gap-1.5"
+                      className="w-full py-2.5 px-3 bg-[#0F766E] hover:bg-teal-700 text-white font-bold text-[11px] rounded-lg shadow-xs flex items-center justify-center gap-1.5 cursor-pointer"
                     >
-                      {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
+                      {isSubmitting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ShieldCheck className="w-3.5 h-3.5" />}
                       <span>VERIFY &amp; GO TO DASHBOARD</span>
                     </button>
 
@@ -970,9 +956,9 @@ export const AuthScreen: React.FC = () => {
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className="w-full py-3.5 bg-[#0F766E] hover:bg-teal-700 text-white font-extrabold text-xs rounded-xl shadow-md flex items-center justify-center gap-1.5 mt-2 cursor-pointer"
+                  className="w-full py-2.5 px-3 bg-[#0F766E] hover:bg-teal-700 text-white font-bold text-[11px] rounded-lg shadow-xs flex items-center justify-center gap-1.5 mt-2 cursor-pointer"
                 >
-                  {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                  {isSubmitting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
                   <span>SUBMIT REGISTRATION FOR APPROVAL</span>
                 </button>
 

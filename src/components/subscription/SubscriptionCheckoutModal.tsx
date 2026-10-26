@@ -18,6 +18,16 @@ import {
 } from 'lucide-react';
 import { InvoiceModal } from './InvoiceModal';
 
+import starterIllustration from '../../assets/images/plan_starter_illustration_1792949301105.jpg';
+import growthIllustration from '../../assets/images/plan_growth_illustration_1792949317578.jpg';
+import professionalIllustration from '../../assets/images/plan_professional_illustration_1792949333786.jpg';
+
+const PLAN_ILLUSTRATIONS: Record<string, string> = {
+  starter: starterIllustration,
+  growth: growthIllustration,
+  professional: professionalIllustration
+};
+
 interface SubscriptionCheckoutModalProps {
   plan: SubscriptionPlan;
   taxConfig: TaxConfiguration | null;
@@ -151,24 +161,44 @@ export const SubscriptionCheckoutModal: React.FC<SubscriptionCheckoutModalProps>
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
       <div className="bg-white rounded-3xl max-w-md w-full shadow-2xl overflow-hidden border border-slate-200 flex flex-col">
-        {/* Modal Header */}
-        <div className="bg-[#0F766E] text-white p-5 flex items-center justify-between">
-          <div>
-            <div className="flex items-center gap-1.5 text-xs text-teal-200 font-bold uppercase tracking-wider">
-              <ShieldCheck className="w-4 h-4 text-white" />
-              <span>Subscribe &amp; Activate Plan</span>
+        {/* Modal Illustration Header */}
+        <div className="relative h-28 w-full overflow-hidden bg-slate-900 border-b border-slate-100">
+          <img
+            src={PLAN_ILLUSTRATIONS[plan.plan_code] || starterIllustration}
+            alt={plan.plan_name}
+            className="w-full h-full object-cover object-center"
+          />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/35 to-transparent pointer-events-none" />
+
+          <div className="absolute bottom-3 left-4 right-4 flex items-end justify-between text-white z-10">
+            <div>
+              <span className="text-[10px] font-black uppercase tracking-wider text-teal-300 block">
+                {plan.plan_code === 'starter'
+                  ? 'PLAN A · ZERO UPFRONT'
+                  : plan.plan_code === 'growth'
+                  ? 'PLAN B · RECOMMENDED'
+                  : 'PLAN C · VIP PRO'}
+              </span>
+              <h3 className="text-lg font-black tracking-tight text-white leading-tight">
+                {plan.plan_name} Plan
+              </h3>
             </div>
-            <h3 className="text-lg font-black tracking-tight text-white mt-0.5">
-              {plan.plan_name} Plan
-            </h3>
+            <div className="text-right">
+              <span className="text-xl font-black font-mono leading-none block">
+                {plan.monthly_price === 0 ? '₹0' : `₹${breakdown.total_payable.toFixed(0)}`}
+              </span>
+              <span className="text-[10px] text-white/80">
+                {plan.monthly_price === 0 ? 'Free Forever' : 'Monthly total'}
+              </span>
+            </div>
           </div>
 
           <button
             type="button"
             onClick={onClose}
-            className="p-1 rounded-xl text-teal-200 hover:text-white hover:bg-teal-800/80 transition-colors cursor-pointer"
+            className="absolute top-3 right-3 w-7 h-7 rounded-full bg-black/50 backdrop-blur-md text-white/90 hover:text-white flex items-center justify-center transition-colors cursor-pointer z-20"
           >
-            <X className="w-5 h-5" />
+            <X className="w-4 h-4" />
           </button>
         </div>
 
@@ -337,7 +367,7 @@ export const SubscriptionCheckoutModal: React.FC<SubscriptionCheckoutModalProps>
               type="button"
               onClick={onClose}
               disabled={isProcessing}
-              className="py-2.5 px-3.5 rounded-xl border border-slate-300 text-slate-600 font-bold text-xs hover:bg-slate-100 transition-colors cursor-pointer"
+              className="py-1.5 px-3 rounded-lg border border-slate-300 text-slate-600 font-semibold text-[11px] hover:bg-slate-100 transition-colors cursor-pointer"
             >
               Cancel
             </button>
@@ -346,21 +376,21 @@ export const SubscriptionCheckoutModal: React.FC<SubscriptionCheckoutModalProps>
               type="button"
               onClick={handleConfirmAndPay}
               disabled={isProcessing}
-              className="py-2.5 px-5 rounded-xl bg-[#0F766E] hover:bg-teal-700 active:bg-teal-800 text-white font-extrabold text-xs shadow-xs flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+              className="py-1.5 px-3.5 rounded-lg bg-[#0F766E] hover:bg-teal-700 active:bg-teal-800 text-white font-bold text-[11px] shadow-xs flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
             >
               {isProcessing ? (
                 <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
                   <span>Verifying Payment...</span>
                 </>
               ) : isStarter ? (
                 <>
-                  <CheckCircle2 className="w-4 h-4" />
+                  <CheckCircle2 className="w-3.5 h-3.5" />
                   <span>Activate Free Starter</span>
                 </>
               ) : (
                 <>
-                  <Lock className="w-3.5 h-3.5" />
+                  <Lock className="w-3 h-3" />
                   <span>Pay ₹{breakdown.total_payable.toFixed(2)} &amp; Activate</span>
                 </>
               )}
